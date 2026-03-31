@@ -21,8 +21,8 @@ WALLET_PATH = "/v2/wallet/synchronous"
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 def build_headers(api_key, api_secret, method, path, body):
-    timestamp = str(int(time.time() * 1000))
-    message   = timestamp + method.upper() + path + body
+    timestamp    = str(int(time.time() * 1000))
+    message      = timestamp + method.upper() + path + body
     try:
         secret_bytes = base64.b64decode(api_secret)
     except Exception:
@@ -49,7 +49,7 @@ def screen_wallet(api_key, api_secret, address):
     }
     body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     hdrs = build_headers(api_key, api_secret, "POST", WALLET_PATH, body)
-    r = requests.post(BASE_URL + WALLET_PATH, headers=hdrs, data=body.encode(), timeout=60)
+    r    = requests.post(BASE_URL + WALLET_PATH, headers=hdrs, data=body.encode(), timeout=60)
     if not r.ok:
         st.error(f"HTTP {r.status_code} — `{r.text}`")
         r.raise_for_status()
@@ -57,16 +57,12 @@ def screen_wallet(api_key, api_secret, address):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def fmt_usd(v):
-    try:    return f"${float(v):,.4f}"
+    try:    return f"${float(v):,.2f}"
     except: return "—"
 
 def fmt_pct(v):
-    try:    return f"{float(v)*100:.4f}%"
+    try:    return f"{float(v):.4f}%"
     except: return "—"
-
-def fmt_num(v):
-    try:    return f"{int(v):,}"
-    except: return str(v) if v is not None else "—"
 
 def fmt_ts(v):
     if not v: return "—"
@@ -77,115 +73,28 @@ def fmt_ts(v):
         return str(v)
 
 def safe_str(v):
-    if v is None: return "—"
+    if v is None:              return "—"
+    if isinstance(v, bool):    return "Yes" if v else "No"
     if isinstance(v, (dict, list)): return json.dumps(v)
     return str(v)
-
-def safe_dicts(val):
-    if not isinstance(val, list): return []
-    return [x for x in val if isinstance(x, dict)]
-
-def risk_badge(score):
-    if score is None: return "❓ Unknown", "#888888"
-    s = float(score)
-    if s >= 7:  return "🔴 HIGH RISK",   "#ff4b4b"
-    if s >= 4:  return "🟠 MEDIUM RISK", "#ffa500"
-    return           "🟢 LOW RISK",      "#21c354"
 
 def bool_icon(v):
     if v is True:  return "⛔ Yes"
     if v is False: return "✅ No"
     return "—"
 
-# ── Parse direction blocks (source / destination) ─────────────────────────────
-def parse_direction_block(block):
-    """
-    Elliptic returns contributions / risk_score_detail / evaluation_detail as:
-    { "source": [...], "destination": [...] }
-    Each item in the list is a category exposure dict.
-    Returns (source_rows, destination_rows) as lists of dicts ready for display.
-    """
-    if not isinstance(block, dict):
-        return [], []
-
-    def parse_side(side):
-        rows = []
-        items = block.get(side, [])
-        if isinstance(items, list):
-            for item in items:
-                if isinstance(item, dict):
-                    rows.append(item)
-                elif isinstance(item, str):
-                    rows.append({"category": item})
-        elif isinstance(items, dict):
-            for k, v in items.items():
-                rows.append({"category": k, "value": v})
-        return rows
-
-    return parse_side("source"), parse_side("destination")
-
-def direction_dataframe(items):
-    """Turn a list of exposure dicts into a display DataFrame."""
-    if not items:
-        return None
-    rows = []
-    for e in items:
-        rows.append({
-            "Entity / Category": e.get("entity_name") or e.get("name") or e.get("category") or "—",
-            "Category":          safe_str(e.get("category")),
-            "Value (USD)":       fmt_usd(e.get("value_usd") or e.get("value") or e.get("amount_usd")),
-            "% of Total":        fmt_pct(e.get("percentage") or e.get("contribution")),
-            "Risk Score":        safe_str(e.get("risk_score")),
-            "Tx Count":          fmt_num(e.get("tx_count")),
-            "Sanctioned":        bool_icon(e.get("is_sanctioned")),
-            "Darknet":           bool_icon(e.get("is_darknet")),
-            "Exchange":          bool_icon(e.get("is_exchange")),
-            "Mixer":             bool_icon(e.get("is_mixer")),
-        })
-    return pd.DataFrame(rows)
-
-def show_direction_tabs(block, title=""):
-    src, dst = parse_direction_block(block)
-    if not src and not dst:
-        st.info("No data returned.")
-        return
-    t1, t2 = st.tabs(["📥 Source (Incoming)", "📤 Destination (Outgoing)"])
-    with t1:
-        df = direction_dataframe(src)
-        if df is not None:
-            st.dataframe(df, use_container_width=True, hide_index=True)
-            _bar_chart(src, f"{title} — Source")
-        else:
-            st.info("No source data.")
-    with t2:
-        df = direction_dataframe(dst)
-        if df is not None:
-            st.dataframe(df, use_container_width=True, hide_index=True)
-            _bar_chart(dst, f"{title} — Destination")
-        else:
-            st.info("No destination data.")
-
-def _bar_chart(items, label):
-    chart = []
-    for e in items:
-        val = e.get("value_usd") or e.get("value") or e.get("amount_usd")
-        try:
-            usd = float(val)
-        except (TypeError, ValueError):
-            usd = 0
-        if usd > 0:
-            name = e.get("entity_name") or e.get("name") or e.get("category") or "Unknown"
-            chart.append({"Entity": name, "USD": usd})
-    if chart:
-        cdf = pd.DataFrame(chart).sort_values("USD", ascending=False).head(12)
-        st.markdown(f"**{label} (USD)**")
-        st.bar_chart(cdf.set_index("Entity")["USD"])
+def risk_badge(score):
+    if score is None: return "❓ Unknown", "#888888"
+    s = float(score) * 10          # API returns 0-1, display as 0-10
+    if s >= 7:  return f"🔴 HIGH RISK ({s:.2f}/10)",   "#ff4b4b"
+    if s >= 4:  return f"🟠 MEDIUM RISK ({s:.2f}/10)", "#ffa500"
+    return           f"🟢 LOW RISK ({s:.2f}/10)",      "#21c354"
 
 # ── Section: Header ───────────────────────────────────────────────────────────
 def render_header(data, address):
-    score = data.get("risk_score")
+    score        = data.get("risk_score")           # 0–1 float
     label, color = risk_badge(score)
-    disp  = data.get("risk_score_display") or score
+    score_10     = float(score) * 10 if score is not None else None
 
     st.markdown(f"""
     <div style="background:{color}22;border-left:6px solid {color};
@@ -203,183 +112,300 @@ def render_header(data, address):
     </div>
     """, unsafe_allow_html=True)
 
+    if score_10 is not None:
+        st.progress(min(score_10 / 10.0, 1.0))
+
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Risk Score",        f"{float(score):.4f}" if score is not None else "—")
-    c2.metric("Asset Tier",        safe_str(data.get("asset_tier")))
-    c3.metric("Workflow Status",   safe_str(data.get("workflow_status")))
-    c4.metric("Screening Source",  safe_str(data.get("screening_source")))
-    if score is not None:
-        st.progress(min(float(score) / 10.0, 1.0))
+    c1.metric("Risk Score (0–10)",  f"{score_10:.4f}" if score_10 is not None else "—")
+    c2.metric("Asset Tier",         safe_str(data.get("asset_tier")))
+    c3.metric("Workflow Status",    safe_str(data.get("workflow_status")))
+    c4.metric("Process Status",     safe_str(data.get("process_status")))
 
-# ── Section: Risk Score Detail ────────────────────────────────────────────────
-def render_risk_score_detail(data):
-    st.markdown("### 📊 Risk Score Detail")
-    st.caption("Breakdown of which counterparty categories drive the risk score, split by incoming (source) and outgoing (destination) flows.")
-    block = data.get("risk_score_detail")
-    if not block:
-        st.info("No risk score detail returned.")
-        return
-    show_direction_tabs(block, "Risk Score Detail")
-
-# ── Section: Evaluation Detail ────────────────────────────────────────────────
-def render_evaluation_detail(data):
-    st.markdown("### 🔬 Evaluation Detail")
-    st.caption("Elliptic's evaluation of each counterparty category's contribution to the overall risk evaluation.")
-    block = data.get("evaluation_detail")
-    if not block:
-        st.info("No evaluation detail returned.")
-        return
-    show_direction_tabs(block, "Evaluation Detail")
-
-# ── Section: Contributions ────────────────────────────────────────────────────
-def render_contributions(data):
-    st.markdown("### 💡 Risk Contributions")
-    st.caption("Percentage contribution of each exposure category to the final risk score.")
-    block = data.get("contributions")
-    if not block:
-        st.info("No contributions data returned.")
-        return
-    show_direction_tabs(block, "Contributions")
+    # Directional risk split
+    rsd = data.get("risk_score_detail") or {}
+    if isinstance(rsd, dict) and rsd:
+        st.markdown("#### Risk Score by Direction")
+        src_score = rsd.get("source")
+        dst_score = rsd.get("destination")
+        d1, d2 = st.columns(2)
+        d1.metric("📥 Source (Incoming) Risk",    f"{float(src_score)*10:.4f}/10" if src_score is not None else "—")
+        d2.metric("📤 Destination (Outgoing) Risk", f"{float(dst_score)*10:.4f}/10" if dst_score is not None else "—")
 
 # ── Section: Cluster Entities ─────────────────────────────────────────────────
 def render_cluster_entities(data):
-    st.markdown("### 🔗 Cluster Entities (analysed_by)")
-    st.caption("Known entities associated with the wallet cluster as identified by Elliptic.")
+    st.markdown("### 🔗 Wallet Cluster Identity")
 
-    analysed_by = data.get("analysed_by")
+    # cluster_entities sits at top level (parallel to analysed_by in real response)
     entities = []
-    if isinstance(analysed_by, dict):
-        entities = safe_dicts(analysed_by.get("cluster_entities", []))
-    elif isinstance(analysed_by, list):
-        entities = safe_dicts(analysed_by)
+    if isinstance(data.get("cluster_entities"), list):
+        entities = [e for e in data["cluster_entities"] if isinstance(e, dict)]
+    elif isinstance(data.get("analysed_by"), dict):
+        ab = data["analysed_by"]
+        if isinstance(ab.get("cluster_entities"), list):
+            entities = [e for e in ab["cluster_entities"] if isinstance(e, dict)]
 
-    if not entities:
-        st.info("No cluster entity data returned.")
+    bi_cluster = (data.get("blockchain_info") or {}).get("cluster") or {}
+
+    if not entities and not bi_cluster:
+        st.info("No cluster identity data returned.")
+        return
+
+    # Blockchain cluster financials
+    if bi_cluster:
+        st.markdown("#### 💹 Cluster Financial Summary")
+        inflow  = (bi_cluster.get("inflow_value")  or {}).get("usd")
+        outflow = (bi_cluster.get("outflow_value") or {}).get("usd")
+        f1, f2, f3 = st.columns(3)
+        f1.metric("Total Inflow (USD)",  fmt_usd(inflow))
+        f2.metric("Total Outflow (USD)", fmt_usd(outflow))
+        try:
+            net = float(inflow or 0) - float(outflow or 0)
+            f3.metric("Net Flow (USD)", fmt_usd(net))
+        except:
+            f3.metric("Net Flow (USD)", "—")
+
+    # Entity table
+    if entities:
+        st.markdown("#### 🏷️ Identified Entities")
+        rows = []
+        for e in entities:
+            rows.append({
+                "Name":            e.get("name", "—"),
+                "Category":        e.get("category", "—"),
+                "Is VASP":         bool_icon(e.get("is_vasp")),
+                "Is Primary":      bool_icon(e.get("is_primary_entity")),
+                "After Sanction Date": bool_icon(e.get("is_after_sanction_date")),
+                "Entity ID":       e.get("entity_id", "—"),
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+# ── Evaluation detail rules renderer ─────────────────────────────────────────
+def render_eval_rules(rules, direction_label):
+    """Render evaluation_detail source/destination rule list."""
+    if not rules:
+        st.info(f"No {direction_label} evaluation rules.")
+        return
+
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        rule_name  = rule.get("rule_name", "Unnamed Rule")
+        risk_score = rule.get("risk_score", 0)
+        risk_10    = float(risk_score) * 10 if risk_score else 0
+        rule_type  = rule.get("rule_type", "—")
+
+        color = "#ff4b4b" if risk_10 >= 7 else ("#ffa500" if risk_10 >= 4 else "#21c354")
+        with st.expander(
+            f"{'🔴' if risk_10>=7 else '🟠' if risk_10>=4 else '🟢'} "
+            f"**{rule_name}** — Risk Score: {risk_10:.4f}/10 | Type: {rule_type}"
+        ):
+            matched = rule.get("matched_elements") or []
+            if not matched:
+                st.info("No matched elements.")
+                continue
+
+            for elem in matched:
+                if not isinstance(elem, dict):
+                    continue
+
+                category = elem.get("category", "Unknown Category")
+                cat_pct  = elem.get("contribution_percentage", 0)
+                cat_usd  = (elem.get("contribution_value") or {}).get("usd")
+                indir_pct= elem.get("indirect_percentage", 0)
+                indir_usd= (elem.get("indirect_value") or {}).get("usd")
+
+                st.markdown(f"**Category: {category}**")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Category Contribution %", fmt_pct(cat_pct))
+                m2.metric("Category Value (USD)",     fmt_usd(cat_usd))
+                m3.metric("Indirect %",               fmt_pct(indir_pct))
+                m4.metric("Indirect Value (USD)",     fmt_usd(indir_usd))
+
+                # Individual entity contributions
+                contributions = elem.get("contributions") or []
+                contrib_dicts = [c for c in contributions if isinstance(c, dict)]
+                if contrib_dicts:
+                    st.markdown("**Flagged Entities within this category:**")
+                    rows = []
+                    for c in contrib_dicts:
+                        rt = c.get("risk_triggers") or {}
+                        rows.append({
+                            "Entity":              c.get("entity", "—"),
+                            "Contribution %":      fmt_pct(c.get("contribution_percentage")),
+                            "Contribution (USD)":  fmt_usd((c.get("contribution_value") or {}).get("usd")),
+                            "Indirect %":          fmt_pct(c.get("indirect_percentage")),
+                            "Indirect (USD)":      fmt_usd((c.get("indirect_value") or {}).get("usd")),
+                            "Min Hops":            safe_str(c.get("min_number_of_hops")),
+                            "Screened Addr":       bool_icon(c.get("is_screened_address")),
+                            "Risk Category":       rt.get("category", "—"),
+                            "Sanctioned":          bool_icon(rt.get("is_sanctioned")),
+                            "Country":             ", ".join(rt.get("country", [])) if rt.get("country") else "—",
+                        })
+                    df = pd.DataFrame(rows)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+
+                    # Highlight sanctioned entities
+                    sanctioned = [r for r in rows if r["Sanctioned"] == "⛔ Yes"]
+                    if sanctioned:
+                        st.error(
+                            "⛔ **Sanctioned entities in this category:**\n" +
+                            "\n".join(f"- {r['Entity']} ({r['Contribution %']} | {r['Contribution (USD)']})"
+                                      for r in sanctioned)
+                        )
+                st.divider()
+
+# ── Section: Evaluation Detail ────────────────────────────────────────────────
+def render_evaluation_detail(data):
+    st.markdown("### 🔬 Evaluation Detail — Rule Breakdown")
+    st.caption(
+        "Each AML rule that matched this wallet, with the specific entities and categories "
+        "that triggered it, exposure amounts, and hop distance from the screened wallet."
+    )
+    ev = data.get("evaluation_detail") or {}
+    if not isinstance(ev, dict):
+        st.info("No evaluation detail returned.")
+        return
+
+    src_rules = [r for r in (ev.get("source") or []) if isinstance(r, dict)]
+    dst_rules = [r for r in (ev.get("destination") or []) if isinstance(r, dict)]
+
+    if not src_rules and not dst_rules:
+        st.success("✅ No evaluation rules matched.")
+        return
+
+    t1, t2 = st.tabs([
+        f"📥 Source / Incoming ({len(src_rules)} rule{'s' if len(src_rules)!=1 else ''})",
+        f"📤 Destination / Outgoing ({len(dst_rules)} rule{'s' if len(dst_rules)!=1 else ''})",
+    ])
+    with t1: render_eval_rules(src_rules, "source")
+    with t2: render_eval_rules(dst_rules, "destination")
+
+# ── Contributions renderer ────────────────────────────────────────────────────
+def render_contribution_side(items, label):
+    """Render contributions.source or contributions.destination."""
+    items = [i for i in (items or []) if isinstance(i, dict)]
+    if not items:
+        st.info(f"No {label} contributions.")
         return
 
     rows = []
-    for e in entities:
+    for c in items:
+        ents = c.get("entities") or []
+        ent  = ents[0] if ents and isinstance(ents[0], dict) else {}
         rows.append({
-            "Name":       e.get("name","—"),
-            "Category":   e.get("category","—"),
-            "Category ID":e.get("category_id","—"),
-            "Sanctioned": bool_icon(e.get("is_sanctioned")),
-            "Darknet":    bool_icon(e.get("is_darknet")),
-            "Exchange":   bool_icon(e.get("is_exchange")),
-            "Risk Score": safe_str(e.get("risk_score")),
+            "Entity":              ent.get("name", "—"),
+            "Category":            ent.get("category", "—"),
+            "Is VASP":             bool_icon(ent.get("is_vasp")),
+            "Contribution %":      fmt_pct(c.get("contribution_percentage")),
+            "Contribution (USD)":  fmt_usd((c.get("contribution_value") or {}).get("usd")),
+            "Counterparty %":      fmt_pct(c.get("counterparty_percentage")),
+            "Counterparty (USD)":  fmt_usd((c.get("counterparty_value") or {}).get("usd")),
+            "Indirect %":          fmt_pct(c.get("indirect_percentage")),
+            "Indirect (USD)":      fmt_usd((c.get("indirect_value") or {}).get("usd")),
+            "Min Hops":            safe_str(c.get("min_number_of_hops")),
+            "Screened Addr":       bool_icon(c.get("is_screened_address")),
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-    with st.expander("Raw analysed_by JSON"):
-        st.json(analysed_by)
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
-# ── Section: Blockchain Info ──────────────────────────────────────────────────
-def render_blockchain_info(data):
-    st.markdown("### ⛓️ Blockchain Info")
-    bi = data.get("blockchain_info")
-    if not isinstance(bi, dict) or not bi:
-        st.info("No blockchain info returned.")
+    # Highlight sanctioned / blacklisted
+    flagged = [
+        r for r in rows
+        if any(kw in r["Category"] for kw in ["Sanctioned", "Blacklist", "Gambling", "Darknet", "Scam", "Ransomware"])
+    ]
+    if flagged:
+        st.warning(
+            f"⚠️ **{len(flagged)} flagged counterparty(ies) in {label} flow:**\n" +
+            "\n".join(
+                f"- **{r['Entity']}** ({r['Category']}) — {r['Contribution %']} | {r['Contribution (USD)']}"
+                for r in flagged
+            )
+        )
+
+    # Bar chart — top contributors by USD
+    chart_rows = []
+    for c in items:
+        ents = c.get("entities") or []
+        ent  = ents[0] if ents and isinstance(ents[0], dict) else {}
+        try:
+            usd = float((c.get("contribution_value") or {}).get("usd") or 0)
+        except:
+            usd = 0
+        if usd > 0:
+            chart_rows.append({"Entity": ent.get("name", "Unknown"), "USD": usd})
+    if chart_rows:
+        cdf = pd.DataFrame(chart_rows).sort_values("USD", ascending=False).head(15)
+        st.markdown(f"**{label} — Top Counterparties by USD Value**")
+        st.bar_chart(cdf.set_index("Entity")["USD"])
+
+# ── Section: Contributions ────────────────────────────────────────────────────
+def render_contributions(data):
+    st.markdown("### 💡 Counterparty Contributions")
+    st.caption(
+        "All counterparties whose funds have flowed through this wallet, "
+        "with their percentage contribution and USD value — both direct (counterparty) "
+        "and indirect (via hops)."
+    )
+    contrib = data.get("contributions") or {}
+    if not isinstance(contrib, dict):
+        st.info("No contributions data returned.")
         return
 
-    # Elliptic returns blockchain_info.cluster
-    cluster = bi.get("cluster")
-    if isinstance(cluster, dict) and cluster:
-        st.markdown("#### Wallet Cluster")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Entity Name",    cluster.get("name","—"))
-        c2.metric("Category",       cluster.get("category","—"))
-        c3.metric("Address Count",  fmt_num(cluster.get("address_count")))
-        c4.metric("Sanctioned",     bool_icon(cluster.get("is_sanctioned")))
+    src  = contrib.get("source") or []
+    dst  = contrib.get("destination") or []
 
-        c5, c6, c7, c8 = st.columns(4)
-        c5.metric("Darknet",        bool_icon(cluster.get("is_darknet")))
-        c6.metric("Exchange",       bool_icon(cluster.get("is_exchange")))
-        c7.metric("Mixer",          bool_icon(cluster.get("is_mixer")))
-        c8.metric("Has Heuristics", bool_icon(cluster.get("has_heuristics")))
-
-        # Transaction stats from cluster
-        if cluster.get("sent") or cluster.get("received"):
-            st.markdown("#### Transaction Volume")
-            r1, r2, r3, r4 = st.columns(4)
-            sent = cluster.get("sent") or {}
-            recv = cluster.get("received") or {}
-            r1.metric("Sent (USD)",     fmt_usd(sent.get("usd") or sent.get("value_usd")))
-            r2.metric("Received (USD)", fmt_usd(recv.get("usd") or recv.get("value_usd")))
-            r3.metric("Sent Txns",      fmt_num(sent.get("tx_count")))
-            r4.metric("Received Txns",  fmt_num(recv.get("tx_count")))
-
-        with st.expander("Full cluster JSON"):
-            st.json(cluster)
-
-    # Other top-level blockchain_info keys
-    other = {k: v for k, v in bi.items() if k != "cluster"}
-    if other:
-        with st.expander("Other blockchain_info fields"):
-            st.json(other)
+    t1, t2 = st.tabs([
+        f"📥 Source / Incoming ({len(src)} entities)",
+        f"📤 Destination / Outgoing ({len(dst)} entities)",
+    ])
+    with t1: render_contribution_side(src, "Source")
+    with t2: render_contribution_side(dst, "Destination")
 
 # ── Section: Triggered Rules ──────────────────────────────────────────────────
 def render_triggered_rules(data):
     st.markdown("### 🚨 Triggered AML Rules")
-    rules = safe_dicts(data.get("triggered_rules") or [])
+    rules = [r for r in (data.get("triggered_rules") or []) if isinstance(r, dict)]
     if not rules:
         st.success("✅ No AML rules triggered for this wallet.")
         return
     st.warning(f"{len(rules)} rule(s) triggered")
     for r in rules:
         with st.expander(f"⚠️ **{r.get('name','Unnamed')}** — Score: {r.get('risk_score','N/A')}"):
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Rule ID",   safe_str(r.get("id")))
-            c2.metric("Score",     safe_str(r.get("risk_score")))
-            c3.metric("Type",      safe_str(r.get("type")))
-            if r.get("description"):
-                st.info(r["description"])
             st.json(r)
 
-# ── Section: Detected Behaviors ───────────────────────────────────────────────
-def render_detected_behaviors(data):
-    st.markdown("### 🧠 Detected Behaviors")
-    behaviors = safe_dicts(data.get("detected_behaviors") or [])
-    if not behaviors:
-        st.success("✅ No specific behaviors detected.")
-        return
-    for b in behaviors:
-        with st.expander(f"🔍 {b.get('name','Behavior')}"):
-            st.json(b)
-
-# ── Section: Subject & Metadata ───────────────────────────────────────────────
+# ── Section: Metadata ─────────────────────────────────────────────────────────
 def render_metadata(data, address):
     st.markdown("### 📋 Screening Metadata")
     subject  = data.get("subject", {})
     customer = data.get("customer", {})
 
-    col1, col2 = st.columns(2)
-    with col1:
+    c1, c2 = st.columns(2)
+    with c1:
         st.markdown("**Subject**")
         st.json(subject)
-    with col2:
+    with c2:
         st.markdown("**Customer Reference**")
         st.json(customer)
 
-    meta_rows = [
-        ("Screening ID",       data.get("screening_id")),
-        ("Report ID",          data.get("id")),
-        ("Type",               data.get("type")),
-        ("Asset Tier",         data.get("asset_tier")),
-        ("Process Status",     data.get("process_status")),
-        ("Workflow Status",    data.get("workflow_status")),
-        ("Screening Source",   data.get("screening_source")),
-        ("Team ID",            data.get("team_id")),
-        ("Created At",         fmt_ts(data.get("created_at"))),
-        ("Updated At",         fmt_ts(data.get("updated_at"))),
-        ("Analysed At",        fmt_ts(data.get("analysed_at"))),
+    rows = [
+        ("Screening ID",      data.get("screening_id")),
+        ("Report ID",         data.get("id")),
+        ("Type",              data.get("type")),
+        ("Asset Tier",        data.get("asset_tier")),
+        ("Process Status",    data.get("process_status")),
+        ("Workflow Status",   data.get("workflow_status")),
+        ("Screening Source",  data.get("screening_source")),
+        ("Team ID",           data.get("team_id")),
+        ("Created At",        fmt_ts(data.get("created_at"))),
+        ("Updated At",        fmt_ts(data.get("updated_at"))),
+        ("Analysed At",       fmt_ts(data.get("analysed_at"))),
+        ("Error",             safe_str(data.get("error"))),
     ]
-    df = pd.DataFrame([{"Field": k, "Value": safe_str(v)} for k, v in meta_rows])
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-# ── Section: Raw JSON ─────────────────────────────────────────────────────────
-def render_raw(data):
-    st.markdown("### 📄 Full Raw API Response")
-    st.json(data)
+    st.dataframe(
+        pd.DataFrame([{"Field": k, "Value": safe_str(v)} for k, v in rows]),
+        use_container_width=True, hide_index=True,
+    )
 
 # ── Main report ───────────────────────────────────────────────────────────────
 def render_report(data, address):
@@ -387,25 +413,21 @@ def render_report(data, address):
     render_header(data, address)
 
     tabs = st.tabs([
-        "📊 Risk Score Detail",
         "🔬 Evaluation Detail",
         "💡 Contributions",
-        "🔗 Cluster Entities",
-        "⛓️ Blockchain Info",
+        "🔗 Cluster Identity",
         "🚨 Triggered Rules",
-        "🧠 Behaviors",
         "📋 Metadata",
         "📄 Raw JSON",
     ])
-    with tabs[0]: render_risk_score_detail(data)
-    with tabs[1]: render_evaluation_detail(data)
-    with tabs[2]: render_contributions(data)
-    with tabs[3]: render_cluster_entities(data)
-    with tabs[4]: render_blockchain_info(data)
-    with tabs[5]: render_triggered_rules(data)
-    with tabs[6]: render_detected_behaviors(data)
-    with tabs[7]: render_metadata(data, address)
-    with tabs[8]: render_raw(data)
+    with tabs[0]: render_evaluation_detail(data)
+    with tabs[1]: render_contributions(data)
+    with tabs[2]: render_cluster_entities(data)
+    with tabs[3]: render_triggered_rules(data)
+    with tabs[4]: render_metadata(data, address)
+    with tabs[5]:
+        st.markdown("### 📄 Full Raw API Response")
+        st.json(data)
 
 # ── Streamlit UI ──────────────────────────────────────────────────────────────
 def main():
@@ -438,9 +460,9 @@ def main():
 
         with st.spinner("Contacting Elliptic API…"):
             try:
-                data = screen_wallet(api_key.strip(), api_secret.strip(), address.strip())
+                result = screen_wallet(api_key.strip(), api_secret.strip(), address.strip())
                 st.success("✅ Screening complete!")
-                render_report(data, address.strip())
+                render_report(result, address.strip())
             except requests.HTTPError:
                 pass
             except requests.ConnectionError:

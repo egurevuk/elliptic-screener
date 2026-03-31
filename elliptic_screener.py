@@ -28,7 +28,7 @@ def build_headers(api_key: str, api_secret: str, method: str, path: str, body: s
     timestamp = str(int(time.time() * 1000))
     msg = timestamp + method.upper() + path + body
     signature = hmac.new(
-        api_secret.encode("utf-8"),
+        bytes.fromhex(api_secret),          # secret is hex-encoded, must decode to raw bytes
         msg.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
@@ -54,12 +54,23 @@ def screen_wallet(api_key: str, api_secret: str, address: str) -> dict:
         },
         "type": "wallet_exposure",
     }
-    body_str = json.dumps(payload, separators=(",", ":"))
+    # Must use compact separators and the EXACT same string for signing and sending
+    body_str = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
     path = WALLET_ENDPOINT
     headers = build_headers(api_key, api_secret, "POST", path, body_str)
 
-    resp = requests.post(BASE_URL + path, headers=headers, data=body_str, timeout=60)
-    resp.raise_for_status()
+    resp = requests.post(
+        BASE_URL + path,
+        headers=headers,
+        data=body_str.encode("utf-8"),   # send as raw bytes, not re-serialized
+        timeout=60,
+    )
+
+    # Surface detailed error info for debugging
+    if not resp.ok:
+        st.error(f"HTTP {resp.status_code} — Raw response: `{resp.text}`")
+        resp.raise_for_status()
+
     return resp.json()
 
 # ── Formatting helpers ────────────────────────────────────────────────────────

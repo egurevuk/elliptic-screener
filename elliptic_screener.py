@@ -85,16 +85,15 @@ def bool_icon(v):
 
 def risk_badge(score):
     if score is None: return "❓ Unknown", "#888888"
-    s = float(score) * 10          # API returns 0-1, display as 0-10
-    if s >= 7:  return f"🔴 HIGH RISK ({s:.2f}/10)",   "#ff4b4b"
-    if s >= 4:  return f"🟠 MEDIUM RISK ({s:.2f}/10)", "#ffa500"
-    return           f"🟢 LOW RISK ({s:.2f}/10)",      "#21c354"
+    s = float(score)               # API returns score directly (0–10 scale)
+    if s >= 7:  return f"🔴 HIGH RISK ({s:.4f}/10)",   "#ff4b4b"
+    if s >= 4:  return f"🟠 MEDIUM RISK ({s:.4f}/10)", "#ffa500"
+    return           f"🟢 LOW RISK ({s:.4f}/10)",      "#21c354"
 
 # ── Section: Header ───────────────────────────────────────────────────────────
 def render_header(data, address):
     score        = data.get("risk_score")           # 0–1 float
     label, color = risk_badge(score)
-    score_10     = float(score) * 10 if score is not None else None
 
     st.markdown(f"""
     <div style="background:{color}22;border-left:6px solid {color};
@@ -112,11 +111,11 @@ def render_header(data, address):
     </div>
     """, unsafe_allow_html=True)
 
-    if score_10 is not None:
-        st.progress(min(score_10 / 10.0, 1.0))
+    if score is not None:
+        st.progress(min(float(score) / 10.0, 1.0))
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Risk Score (0–10)",  f"{score_10:.4f}" if score_10 is not None else "—")
+    c1.metric("Risk Score (0–10)",  f"{float(score):.4f}" if score is not None else "—")
     c2.metric("Asset Tier",         safe_str(data.get("asset_tier")))
     c3.metric("Workflow Status",    safe_str(data.get("workflow_status")))
     c4.metric("Process Status",     safe_str(data.get("process_status")))
@@ -128,8 +127,8 @@ def render_header(data, address):
         src_score = rsd.get("source")
         dst_score = rsd.get("destination")
         d1, d2 = st.columns(2)
-        d1.metric("📥 Source (Incoming) Risk",    f"{float(src_score)*10:.4f}/10" if src_score is not None else "—")
-        d2.metric("📤 Destination (Outgoing) Risk", f"{float(dst_score)*10:.4f}/10" if dst_score is not None else "—")
+        d1.metric("📥 Source (Incoming) Risk",     f"{float(src_score):.4f}/10" if src_score is not None else "—")
+        d2.metric("📤 Destination (Outgoing) Risk", f"{float(dst_score):.4f}/10" if dst_score is not None else "—")
 
 # ── Section: Cluster Entities ─────────────────────────────────────────────────
 def render_cluster_entities(data):

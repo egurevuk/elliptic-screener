@@ -198,53 +198,65 @@ def render_exposures(data):
     tabs = st.tabs(["All Exposures", "Direct", "Indirect", "Contributions"])
 
     def exp_table(exps, label):
-        if not exps:
-            st.info(f"No {label} data.")
-            return
-        rows = []
-        for e in exps:
-            rows.append({
-                "Entity":        e.get("entity_name") or e.get("counterparty_name") or "—",
-                "Category":      e.get("category","—"),
-                "Sub-Category":  e.get("sub_category","—"),
-                "Direction":     e.get("direction","—"),
-                "Value (USD)":   fmt_usd(e.get("value_usd") or e.get("amount_usd")),
-                "% of Total":    fmt_pct(e.get("percentage")),
-                "Risk Score":    e.get("risk_score","—"),
-                "Sanctioned":    bool_icon(e.get("is_sanctioned")),
-                "Darknet":       bool_icon(e.get("is_darknet")),
-                "Exchange":      bool_icon(e.get("is_exchange")),
-                "Mixer":         bool_icon(e.get("is_mixer")),
-            })
-        df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+            if not exps:
+                st.info(f"No {label} data.")
+                return
+            # Filter to dicts only — API may mix in strings or other types
+            exps = [e for e in exps if isinstance(e, dict)]
+            if not exps:
+                st.info(f"No {label} data (items were not in expected format).")
+                return
+            rows = []
+            for e in exps:
+                rows.append({
+                    "Entity":        e.get("entity_name") or e.get("counterparty_name") or e.get("category") or "—",
+                    "Category":      e.get("category") or "—",
+                    "Sub-Category":  e.get("sub_category") or "—",
+                    "Direction":     e.get("direction") or "—",
+                    "Value (USD)":   fmt_usd(e.get("value_usd") or e.get("amount_usd")),
+                    "% of Total":    fmt_pct(e.get("percentage")),
+                    "Risk Score":    e.get("risk_score") or "—",
+                    "Sanctioned":    bool_icon(e.get("is_sanctioned")),
+                    "Darknet":       bool_icon(e.get("is_darknet")),
+                    "Exchange":      bool_icon(e.get("is_exchange")),
+                    "Mixer":         bool_icon(e.get("is_mixer")),
+                })
+            df = pd.DataFrame(rows)
+            st.dataframe(df, use_container_width=True, hide_index=True)
 
-        # Bar chart of USD exposure
-        chart_rows = [
-            {"Entity": e.get("entity_name") or e.get("counterparty_name") or e.get("category","?"),
-             "USD":    float(e.get("value_usd") or e.get("amount_usd") or 0)}
-            for e in exps if (e.get("value_usd") or e.get("amount_usd"))
-        ]
-        if chart_rows:
-            cdf = pd.DataFrame(chart_rows)
-            cdf = cdf[cdf["USD"] > 0].sort_values("USD", ascending=False).head(12)
-            st.markdown(f"**{label} — Exposure by Entity (USD)**")
-            st.bar_chart(cdf.set_index("Entity")["USD"])
+            # Bar chart
+            chart_rows = []
+            for e in exps:
+                val = e.get("value_usd") or e.get("amount_usd")
+                try:
+                    usd = float(val)
+                except (TypeError, ValueError):
+                    continue
+                if usd > 0:
+                    chart_rows.append({
+                        "Entity": e.get("entity_name") or e.get("counterparty_name") or e.get("category") or "Unknown",
+                        "USD": usd,
+                    })
+            if chart_rows:
+                cdf = pd.DataFrame(chart_rows).sort_values("USD", ascending=False).head(12)
+                st.markdown(f"**{label} — Exposure by Entity (USD)**")
+                st.bar_chart(cdf.set_index("Entity")["USD"])
 
     with tabs[0]: exp_table(all_exp,      "exposure")
     with tabs[1]: exp_table(direct_exp,   "direct exposure")
     with tabs[2]: exp_table(indirect_exp, "indirect exposure")
     with tabs[3]:
-        if not contrib:
+        contrib_dicts = [c for c in contrib if isinstance(c, dict)]
+        if not contrib_dicts:
             st.info("No contribution data returned.")
         else:
             rows = []
-            for c in contrib:
+            for c in contrib_dicts:
                 rows.append({
-                    "Entity":       c.get("entity_name","—"),
-                    "Category":     c.get("category","—"),
+                    "Entity":       c.get("entity_name") or "—",
+                    "Category":     c.get("category") or "—",
                     "Contribution": fmt_pct(c.get("contribution")),
-                    "Risk Score":   c.get("risk_score","—"),
+                    "Risk Score":   c.get("risk_score") or "—",
                     "Value (USD)":  fmt_usd(c.get("value_usd")),
                 })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
@@ -314,6 +326,7 @@ def render_counterparties(data):
     cps = (data.get("counterparties")
            or data.get("counterparty_entities")
            or [])
+    cps = [cp for cp in cps if isinstance(cp, dict)]
     if not cps:
         st.info("No counterparty entity data returned.")
         return
@@ -321,13 +334,13 @@ def render_counterparties(data):
     rows = []
     for cp in cps:
         rows.append({
-            "Name":           cp.get("name","—"),
-            "Category":       cp.get("category","—"),
-            "Direction":      cp.get("direction","—"),
+            "Name":           cp.get("name") or "—",
+            "Category":       cp.get("category") or "—",
+            "Direction":      cp.get("direction") or "—",
             "Volume (USD)":   fmt_usd(cp.get("volume_usd") or cp.get("value_usd")),
             "Tx Count":       fmt_num(cp.get("tx_count")),
             "Sanctioned":     bool_icon(cp.get("is_sanctioned")),
-            "Risk Score":     cp.get("risk_score","—"),
+            "Risk Score":     cp.get("risk_score") or "—",
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 

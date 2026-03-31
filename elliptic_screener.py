@@ -13,8 +13,7 @@ import hashlib, hmac, json, time, base64, uuid
 import requests
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
+
 from datetime import datetime, timezone
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -220,19 +219,17 @@ def render_exposures(data):
         df = pd.DataFrame(rows)
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-        # Pie chart of USD exposure
+        # Bar chart of USD exposure
         chart_rows = [
-            {"Entity": r["Entity"], "USD": float(e.get("value_usd") or e.get("amount_usd") or 0)}
-            for r, e in zip(rows, exps) if (e.get("value_usd") or e.get("amount_usd"))
+            {"Entity": e.get("entity_name") or e.get("counterparty_name") or e.get("category","?"),
+             "USD":    float(e.get("value_usd") or e.get("amount_usd") or 0)}
+            for e in exps if (e.get("value_usd") or e.get("amount_usd"))
         ]
         if chart_rows:
             cdf = pd.DataFrame(chart_rows)
             cdf = cdf[cdf["USD"] > 0].sort_values("USD", ascending=False).head(12)
-            fig = px.pie(cdf, names="Entity", values="USD",
-                         title=f"{label} — by Entity (USD)",
-                         hole=0.4, height=380)
-            fig.update_traces(textposition="inside", textinfo="percent+label")
-            st.plotly_chart(fig, use_container_width=True)
+            st.markdown(f"**{label} — Exposure by Entity (USD)**")
+            st.bar_chart(cdf.set_index("Entity")["USD"])
 
     with tabs[0]: exp_table(all_exp,      "exposure")
     with tabs[1]: exp_table(direct_exp,   "direct exposure")

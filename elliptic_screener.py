@@ -429,20 +429,45 @@ def render_report(data, address):
         st.json(data)
 
 # ── Streamlit UI ──────────────────────────────────────────────────────────────
+def load_credentials():
+    """
+    Load credentials from st.secrets (secrets.toml) if available,
+    otherwise fall back to manual sidebar input.
+    Returns (api_key, api_secret, from_secrets).
+    """
+    try:
+        key    = st.secrets["elliptic"]["api_key"]
+        secret = st.secrets["elliptic"]["api_secret"]
+        if key and secret:
+            return key, secret, True
+    except (KeyError, FileNotFoundError):
+        pass
+    return None, None, False
+
+
 def main():
     st.set_page_config(page_title="Elliptic Wallet Screener", page_icon="🔍", layout="wide")
     st.title("🔍 Elliptic Wallet Screener")
     st.caption("Full AML exposure report for Tron (TRC-20 / USDT) wallets via the Elliptic API.")
 
+    api_key, api_secret, from_secrets = load_credentials()
+
     with st.sidebar:
-        st.header("🔑 API Credentials")
-        st.warning("Credentials are used only for the current request and are never stored.")
-        api_key    = st.text_input("API Key",    type="password", placeholder="your-api-key")
-        api_secret = st.text_input("API Secret", type="password", placeholder="your-api-secret")
-        st.divider()
         st.markdown("**Blockchain:** Tron (TRC-20)")
         st.markdown("**Asset:** USDT")
         st.markdown("[📖 Elliptic Docs](https://developers.elliptic.co/docs/quick-start-sdks)")
+        st.divider()
+
+        if from_secrets:
+            st.success("🔑 API credentials loaded from `secrets.toml`")
+        else:
+            st.header("🔑 API Credentials")
+            st.warning(
+                "No `secrets.toml` found. Enter credentials manually, "
+                "or create `.streamlit/secrets.toml` to avoid this step."
+            )
+            api_key    = st.text_input("API Key",    type="password", placeholder="your-api-key")
+            api_secret = st.text_input("API Secret", type="password", placeholder="your-api-secret")
 
     address = st.text_input(
         "Tron Wallet Address",

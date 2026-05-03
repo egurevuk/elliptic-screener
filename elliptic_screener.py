@@ -431,50 +431,291 @@ def render_report(data, address):
 # ── Streamlit UI ──────────────────────────────────────────────────────────────
 def load_credentials():
     """
-    Load credentials from st.secrets (secrets.toml) if available,
-    otherwise fall back to manual sidebar input.
+    Load credentials from st.secrets in multiple fallback formats:
+      1. [elliptic] section:  api_key / api_secret
+      2. Flat keys:           ELLIPTIC_API_KEY / ELLIPTIC_API_SECRET
     Returns (api_key, api_secret, from_secrets).
     """
     try:
-        key    = st.secrets["elliptic"]["api_key"]
-        secret = st.secrets["elliptic"]["api_secret"]
+        # Format 1: nested [elliptic] section
+        if "elliptic" in st.secrets:
+            key    = st.secrets["elliptic"].get("api_key") or st.secrets["elliptic"].get("API_KEY")
+            secret = st.secrets["elliptic"].get("api_secret") or st.secrets["elliptic"].get("API_SECRET")
+            if key and secret:
+                return key, secret, True
+
+        # Format 2: flat top-level keys
+        key    = st.secrets.get("ELLIPTIC_API_KEY")    or st.secrets.get("elliptic_api_key")
+        secret = st.secrets.get("ELLIPTIC_API_SECRET") or st.secrets.get("elliptic_api_secret")
         if key and secret:
             return key, secret, True
-    except (KeyError, FileNotFoundError):
+
+    except Exception:
         pass
+
     return None, None, False
 
 
+ROKKY_CSS = """
+<style>
+/* ── Google Font ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* ── Base ── */
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif !important;
+}
+.stApp {
+    background: #0a0a0f !important;
+    color: #e2e8f0 !important;
+}
+
+/* ── Hide default Streamlit chrome ── */
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 2rem !important; max-width: 1400px !important; }
+
+/* ── Custom header banner ── */
+.rokky-header {
+    background: linear-gradient(135deg, #0d0d1a 0%, #0f0f2e 50%, #0d0d1a 100%);
+    border-bottom: 1px solid rgba(99,102,241,0.25);
+    padding: 1.5rem 2rem 1.2rem;
+    margin: -2rem -1rem 2rem -1rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+.rokky-logo {
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6, #06b6d4);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.rokky-tagline {
+    font-size: 0.78rem;
+    color: #64748b;
+    margin-top: 2px;
+    letter-spacing: 0.3px;
+}
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+    background: #0d0d1a !important;
+    border-right: 1px solid rgba(99,102,241,0.15) !important;
+}
+[data-testid="stSidebar"] * { color: #cbd5e1 !important; }
+[data-testid="stSidebar"] .stTextInput input {
+    background: #131327 !important;
+    border: 1px solid rgba(99,102,241,0.3) !important;
+    border-radius: 8px !important;
+    color: #e2e8f0 !important;
+}
+[data-testid="stSidebar"] .stTextInput input:focus {
+    border-color: #6366f1 !important;
+    box-shadow: 0 0 0 2px rgba(99,102,241,0.2) !important;
+}
+
+/* ── Main input ── */
+.stTextInput input {
+    background: #131327 !important;
+    border: 1px solid rgba(99,102,241,0.3) !important;
+    border-radius: 10px !important;
+    color: #e2e8f0 !important;
+    padding: 0.65rem 1rem !important;
+    font-size: 0.95rem !important;
+    transition: all 0.2s !important;
+}
+.stTextInput input:focus {
+    border-color: #6366f1 !important;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.15) !important;
+}
+.stTextInput label { color: #94a3b8 !important; font-size: 0.82rem !important; font-weight: 500 !important; }
+
+/* ── Primary button ── */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+    border: none !important;
+    border-radius: 10px !important;
+    color: white !important;
+    font-weight: 600 !important;
+    font-size: 0.95rem !important;
+    padding: 0.6rem 2rem !important;
+    letter-spacing: 0.3px !important;
+    box-shadow: 0 4px 20px rgba(99,102,241,0.35) !important;
+    transition: all 0.2s !important;
+}
+.stButton > button[kind="primary"]:hover {
+    box-shadow: 0 6px 28px rgba(99,102,241,0.55) !important;
+    transform: translateY(-1px) !important;
+}
+.stButton > button {
+    background: rgba(99,102,241,0.08) !important;
+    border: 1px solid rgba(99,102,241,0.25) !important;
+    border-radius: 10px !important;
+    color: #a5b4fc !important;
+    font-weight: 500 !important;
+}
+
+/* ── Metrics ── */
+[data-testid="stMetric"] {
+    background: rgba(15,15,35,0.8) !important;
+    border: 1px solid rgba(99,102,241,0.18) !important;
+    border-radius: 12px !important;
+    padding: 1rem 1.2rem !important;
+    backdrop-filter: blur(10px) !important;
+}
+[data-testid="stMetricLabel"] { color: #64748b !important; font-size: 0.75rem !important; font-weight: 500 !important; text-transform: uppercase !important; letter-spacing: 0.5px !important; }
+[data-testid="stMetricValue"] { color: #e2e8f0 !important; font-size: 1.3rem !important; font-weight: 700 !important; }
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: rgba(15,15,35,0.6) !important;
+    border-radius: 12px !important;
+    padding: 4px !important;
+    border: 1px solid rgba(99,102,241,0.15) !important;
+    gap: 2px !important;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    border-radius: 8px !important;
+    color: #64748b !important;
+    font-size: 0.82rem !important;
+    font-weight: 500 !important;
+    padding: 0.4rem 0.9rem !important;
+    border: none !important;
+}
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+    color: white !important;
+    font-weight: 600 !important;
+}
+.stTabs [data-baseweb="tab-panel"] {
+    background: rgba(15,15,35,0.4) !important;
+    border-radius: 0 0 12px 12px !important;
+    border: 1px solid rgba(99,102,241,0.12) !important;
+    border-top: none !important;
+    padding: 1.2rem !important;
+}
+
+/* ── Dataframes ── */
+[data-testid="stDataFrame"] {
+    border: 1px solid rgba(99,102,241,0.18) !important;
+    border-radius: 10px !important;
+    overflow: hidden !important;
+}
+.dvn-scroller { background: #0a0a0f !important; }
+
+/* ── Expanders ── */
+[data-testid="stExpander"] {
+    background: rgba(15,15,35,0.5) !important;
+    border: 1px solid rgba(99,102,241,0.18) !important;
+    border-radius: 10px !important;
+    margin-bottom: 0.5rem !important;
+}
+[data-testid="stExpander"] summary { color: #a5b4fc !important; font-weight: 500 !important; }
+
+/* ── Alerts ── */
+.stAlert {
+    border-radius: 10px !important;
+    border-left-width: 4px !important;
+}
+[data-baseweb="notification"][kind="positive"] { background: rgba(16,185,129,0.08) !important; border-color: #10b981 !important; }
+[data-baseweb="notification"][kind="negative"] { background: rgba(239,68,68,0.08) !important; border-color: #ef4444 !important; }
+[data-baseweb="notification"][kind="warning"]  { background: rgba(245,158,11,0.08) !important; border-color: #f59e0b !important; }
+[data-baseweb="notification"][kind="info"]     { background: rgba(99,102,241,0.08) !important; border-color: #6366f1 !important; }
+
+/* ── Progress bar ── */
+[data-testid="stProgressBar"] > div > div {
+    background: linear-gradient(90deg, #6366f1, #8b5cf6, #06b6d4) !important;
+    border-radius: 99px !important;
+}
+[data-testid="stProgressBar"] > div {
+    background: rgba(99,102,241,0.12) !important;
+    border-radius: 99px !important;
+    height: 8px !important;
+}
+
+/* ── Divider ── */
+hr {
+    border-color: rgba(99,102,241,0.15) !important;
+    margin: 1.5rem 0 !important;
+}
+
+/* ── Code blocks ── */
+code, pre {
+    background: rgba(99,102,241,0.08) !important;
+    border: 1px solid rgba(99,102,241,0.15) !important;
+    border-radius: 6px !important;
+    color: #a5b4fc !important;
+    font-size: 0.82rem !important;
+}
+
+/* ── Markdown headings ── */
+h1, h2, h3, h4 { color: #e2e8f0 !important; font-weight: 700 !important; }
+h3 { border-bottom: 1px solid rgba(99,102,241,0.15); padding-bottom: 0.4rem; margin-top: 1.2rem !important; }
+
+/* ── Caption / small text ── */
+.stCaption, small, [data-testid="stCaptionContainer"] { color: #475569 !important; }
+
+/* ── Spinner ── */
+[data-testid="stSpinner"] { color: #6366f1 !important; }
+
+/* ── Success/error/warning text ── */
+.stSuccess { color: #10b981 !important; }
+.stError   { color: #ef4444 !important; }
+</style>
+"""
+
 def main():
-    st.set_page_config(page_title="Elliptic Wallet Screener", page_icon="🔍", layout="wide")
-    st.title("🔍 Elliptic Wallet Screener")
-    st.caption("Full AML exposure report for Tron (TRC-20 / USDT) wallets via the Elliptic API.")
+    st.set_page_config(
+        page_title="AML Wallet Screener",
+        page_icon="🛡️",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    st.markdown(ROKKY_CSS, unsafe_allow_html=True)
+
+    # ── Custom header
+    st.markdown("""
+    <div class="rokky-header">
+        <div>
+            <div class="rokky-logo">🛡️ AML Screener</div>
+            <div class="rokky-tagline">Powered by Elliptic · Tron / USDT · Real-time wallet exposure analysis</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     api_key, api_secret, from_secrets = load_credentials()
 
     with st.sidebar:
-        st.markdown("**Blockchain:** Tron (TRC-20)")
-        st.markdown("**Asset:** USDT")
-        st.markdown("[📖 Elliptic Docs](https://developers.elliptic.co/docs/quick-start-sdks)")
+        st.markdown("### 🛡️ AML Screener")
+        st.markdown("<div style='color:#475569;font-size:0.78rem;margin-bottom:1rem'>Elliptic · Tron / USDT</div>", unsafe_allow_html=True)
         st.divider()
 
         if from_secrets:
-            st.success("🔑 API credentials loaded from `secrets.toml`")
+            st.success("🔑 API credentials loaded")
         else:
-            st.header("🔑 API Credentials")
-            st.warning(
-                "No `secrets.toml` found. Enter credentials manually, "
-                "or create `.streamlit/secrets.toml` to avoid this step."
-            )
+            st.markdown("#### 🔑 API Credentials")
+            st.warning("Add credentials to `secrets.toml` to skip this step.")
             api_key    = st.text_input("API Key",    type="password", placeholder="your-api-key")
             api_secret = st.text_input("API Secret", type="password", placeholder="your-api-secret")
 
+        st.divider()
+        st.markdown("<div style='color:#475569;font-size:0.78rem'>Blockchain: Tron (TRC-20)<br>Asset: USDT<br><br><a style='color:#6366f1' href='https://developers.elliptic.co/docs/quick-start-sdks'>📖 Elliptic Docs</a></div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='color:#94a3b8;font-size:0.78rem;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:0.3rem'>Wallet Address</div>", unsafe_allow_html=True)
     address = st.text_input(
-        "Tron Wallet Address",
+        "Wallet Address",
         placeholder="e.g. TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs",
+        label_visibility="collapsed",
     )
 
-    if st.button("🔎 Screen Wallet", type="primary", use_container_width=True):
+    col_btn, col_spacer = st.columns([1, 3])
+    with col_btn:
+        run = st.button("🔎 Screen Wallet", type="primary", use_container_width=True)
+
+    if run:
         if not api_key or not api_secret:
             st.error("Enter your API Key and Secret in the sidebar.")
             st.stop()

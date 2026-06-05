@@ -3,13 +3,13 @@ Elliptic Wallet Screener — Full Detail Report
 Screens Tron USDT wallets using the Elliptic Synchronous Screening API.
 
 Install:
-    pip install streamlit requests pandas
+    pip install streamlit requests pandas openpyxl
 
 Run:
     streamlit run elliptic_screener.py
 """
 
-import hashlib, hmac, json, time, base64, uuid
+import hashlib, hmac, json, time, base64, uuid, io
 import requests
 import streamlit as st
 import pandas as pd
@@ -456,55 +456,534 @@ def load_credentials():
     return None, None, False
 
 
+ROKKY_CSS = """
+<style>
+/* ── Google Font ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* ── Base ── */
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif !important;
+}
+.stApp {
+    background: #0a0a0f !important;
+    color: #e2e8f0 !important;
+}
+
+/* ── Hide default Streamlit chrome ── */
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 2rem !important; max-width: 1400px !important; }
+
+/* ── Custom header banner ── */
+.rokky-header {
+    background: linear-gradient(135deg, #0d0d1a 0%, #0f0f2e 50%, #0d0d1a 100%);
+    border-bottom: 1px solid rgba(99,102,241,0.25);
+    padding: 1.5rem 2rem 1.2rem;
+    margin: -2rem -1rem 2rem -1rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+.rokky-logo {
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6, #06b6d4);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.rokky-tagline {
+    font-size: 0.78rem;
+    color: #64748b;
+    margin-top: 2px;
+    letter-spacing: 0.3px;
+}
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+    background: #0d0d1a !important;
+    border-right: 1px solid rgba(99,102,241,0.15) !important;
+}
+[data-testid="stSidebar"] * { color: #cbd5e1 !important; }
+[data-testid="stSidebar"] .stTextInput input {
+    background: #131327 !important;
+    border: 1px solid rgba(99,102,241,0.3) !important;
+    border-radius: 8px !important;
+    color: #e2e8f0 !important;
+}
+[data-testid="stSidebar"] .stTextInput input:focus {
+    border-color: #6366f1 !important;
+    box-shadow: 0 0 0 2px rgba(99,102,241,0.2) !important;
+}
+
+/* ── Main input ── */
+.stTextInput input {
+    background: #131327 !important;
+    border: 1px solid rgba(99,102,241,0.3) !important;
+    border-radius: 10px !important;
+    color: #e2e8f0 !important;
+    padding: 0.65rem 1rem !important;
+    font-size: 0.95rem !important;
+    transition: all 0.2s !important;
+}
+.stTextInput input:focus {
+    border-color: #6366f1 !important;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.15) !important;
+}
+.stTextInput label { color: #94a3b8 !important; font-size: 0.82rem !important; font-weight: 500 !important; }
+
+/* ── Primary button ── */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+    border: none !important;
+    border-radius: 10px !important;
+    color: white !important;
+    font-weight: 600 !important;
+    font-size: 0.95rem !important;
+    padding: 0.6rem 2rem !important;
+    letter-spacing: 0.3px !important;
+    box-shadow: 0 4px 20px rgba(99,102,241,0.35) !important;
+    transition: all 0.2s !important;
+}
+.stButton > button[kind="primary"]:hover {
+    box-shadow: 0 6px 28px rgba(99,102,241,0.55) !important;
+    transform: translateY(-1px) !important;
+}
+.stButton > button {
+    background: rgba(99,102,241,0.08) !important;
+    border: 1px solid rgba(99,102,241,0.25) !important;
+    border-radius: 10px !important;
+    color: #a5b4fc !important;
+    font-weight: 500 !important;
+}
+
+/* ── Metrics ── */
+[data-testid="stMetric"] {
+    background: rgba(15,15,35,0.8) !important;
+    border: 1px solid rgba(99,102,241,0.18) !important;
+    border-radius: 12px !important;
+    padding: 1rem 1.2rem !important;
+    backdrop-filter: blur(10px) !important;
+}
+[data-testid="stMetricLabel"] { color: #64748b !important; font-size: 0.75rem !important; font-weight: 500 !important; text-transform: uppercase !important; letter-spacing: 0.5px !important; }
+[data-testid="stMetricValue"] { color: #e2e8f0 !important; font-size: 1.3rem !important; font-weight: 700 !important; }
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: rgba(15,15,35,0.6) !important;
+    border-radius: 12px !important;
+    padding: 4px !important;
+    border: 1px solid rgba(99,102,241,0.15) !important;
+    gap: 2px !important;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    border-radius: 8px !important;
+    color: #64748b !important;
+    font-size: 0.82rem !important;
+    font-weight: 500 !important;
+    padding: 0.4rem 0.9rem !important;
+    border: none !important;
+}
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+    color: white !important;
+    font-weight: 600 !important;
+}
+.stTabs [data-baseweb="tab-panel"] {
+    background: rgba(15,15,35,0.4) !important;
+    border-radius: 0 0 12px 12px !important;
+    border: 1px solid rgba(99,102,241,0.12) !important;
+    border-top: none !important;
+    padding: 1.2rem !important;
+}
+
+/* ── Dataframes ── */
+[data-testid="stDataFrame"] {
+    border: 1px solid rgba(99,102,241,0.18) !important;
+    border-radius: 10px !important;
+    overflow: hidden !important;
+}
+.dvn-scroller { background: #0a0a0f !important; }
+
+/* ── Expanders ── */
+[data-testid="stExpander"] {
+    background: rgba(15,15,35,0.5) !important;
+    border: 1px solid rgba(99,102,241,0.18) !important;
+    border-radius: 10px !important;
+    margin-bottom: 0.5rem !important;
+}
+[data-testid="stExpander"] summary { color: #a5b4fc !important; font-weight: 500 !important; }
+
+/* ── Alerts ── */
+.stAlert {
+    border-radius: 10px !important;
+    border-left-width: 4px !important;
+}
+[data-baseweb="notification"][kind="positive"] { background: rgba(16,185,129,0.08) !important; border-color: #10b981 !important; }
+[data-baseweb="notification"][kind="negative"] { background: rgba(239,68,68,0.08) !important; border-color: #ef4444 !important; }
+[data-baseweb="notification"][kind="warning"]  { background: rgba(245,158,11,0.08) !important; border-color: #f59e0b !important; }
+[data-baseweb="notification"][kind="info"]     { background: rgba(99,102,241,0.08) !important; border-color: #6366f1 !important; }
+
+/* ── Progress bar ── */
+[data-testid="stProgressBar"] > div > div {
+    background: linear-gradient(90deg, #6366f1, #8b5cf6, #06b6d4) !important;
+    border-radius: 99px !important;
+}
+[data-testid="stProgressBar"] > div {
+    background: rgba(99,102,241,0.12) !important;
+    border-radius: 99px !important;
+    height: 8px !important;
+}
+
+/* ── Divider ── */
+hr {
+    border-color: rgba(99,102,241,0.15) !important;
+    margin: 1.5rem 0 !important;
+}
+
+/* ── Code blocks ── */
+code, pre {
+    background: rgba(99,102,241,0.08) !important;
+    border: 1px solid rgba(99,102,241,0.15) !important;
+    border-radius: 6px !important;
+    color: #a5b4fc !important;
+    font-size: 0.82rem !important;
+}
+
+/* ── Markdown headings ── */
+h1, h2, h3, h4 { color: #e2e8f0 !important; font-weight: 700 !important; }
+h3 { border-bottom: 1px solid rgba(99,102,241,0.15); padding-bottom: 0.4rem; margin-top: 1.2rem !important; }
+
+/* ── Caption / small text ── */
+.stCaption, small, [data-testid="stCaptionContainer"] { color: #475569 !important; }
+
+/* ── Spinner ── */
+[data-testid="stSpinner"] { color: #6366f1 !important; }
+
+/* ── Success/error/warning text ── */
+.stSuccess { color: #10b981 !important; }
+.stError   { color: #ef4444 !important; }
+</style>
+"""
+
 def main():
-    st.set_page_config(page_title="Elliptic Wallet Screener", page_icon="🔍", layout="wide")
-    st.title("🔍 Elliptic Wallet Screener")
-    st.caption("Full AML exposure report for Tron (TRC-20 / USDT) wallets via the Elliptic API.")
+    st.set_page_config(
+        page_title="AML Wallet Screener",
+        page_icon="🛡️",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    st.markdown(ROKKY_CSS, unsafe_allow_html=True)
+
+    # ── Custom header
+    st.markdown("""
+    <div class="rokky-header">
+        <div>
+            <div class="rokky-logo">🛡️ AML Screener</div>
+            <div class="rokky-tagline">Powered by Elliptic · Tron / USDT · Real-time wallet exposure analysis</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     api_key, api_secret, from_secrets = load_credentials()
 
     with st.sidebar:
-        st.markdown("**Blockchain:** Tron (TRC-20)")
-        st.markdown("**Asset:** USDT")
-        st.markdown("[📖 Elliptic Docs](https://developers.elliptic.co/docs/quick-start-sdks)")
+        st.markdown("### 🛡️ AML Screener")
+        st.markdown("<div style='color:#475569;font-size:0.78rem;margin-bottom:1rem'>Elliptic · Tron / USDT</div>", unsafe_allow_html=True)
         st.divider()
 
         if from_secrets:
-            st.success("🔑 API credentials loaded from `secrets.toml`")
+            st.success("🔑 API credentials loaded")
         else:
-            st.header("🔑 API Credentials")
-            st.warning(
-                "No `secrets.toml` found. Enter credentials manually, "
-                "or create `.streamlit/secrets.toml` to avoid this step."
-            )
+            st.markdown("#### 🔑 API Credentials")
+            st.warning("Add credentials to `secrets.toml` to skip this step.")
             api_key    = st.text_input("API Key",    type="password", placeholder="your-api-key")
             api_secret = st.text_input("API Secret", type="password", placeholder="your-api-secret")
 
-    address = st.text_input(
-        "Tron Wallet Address",
-        placeholder="e.g. TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs",
+        st.divider()
+        st.markdown("<div style='color:#475569;font-size:0.78rem'>Blockchain: Tron (TRC-20)<br>Asset: USDT<br><br><a style='color:#6366f1' href='https://developers.elliptic.co/docs/quick-start-sdks'>📖 Elliptic Docs</a></div>", unsafe_allow_html=True)
+
+    # ── Mode toggle ───────────────────────────────────────────────────────────
+    mode = st.radio(
+        "Screening mode",
+        ["🔍 Single Wallet", "📂 Bulk Scan (Excel / CSV)"],
+        horizontal=True,
+        label_visibility="collapsed",
     )
+    st.divider()
 
-    if st.button("🔎 Screen Wallet", type="primary", use_container_width=True):
-        if not api_key or not api_secret:
-            st.error("Enter your API Key and Secret in the sidebar.")
-            st.stop()
-        if not address.strip().startswith("T"):
-            st.error("Enter a valid Tron address (starts with 'T').")
-            st.stop()
+    # ══════════════════════════════════════════════════════════════════════════
+    # SINGLE WALLET
+    # ══════════════════════════════════════════════════════════════════════════
+    if mode == "🔍 Single Wallet":
+        st.markdown("<div style='color:#94a3b8;font-size:0.78rem;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:0.3rem'>Wallet Address</div>", unsafe_allow_html=True)
+        address = st.text_input(
+            "Wallet Address",
+            placeholder="e.g. TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs",
+            label_visibility="collapsed",
+        )
+        col_btn, col_spacer = st.columns([1, 3])
+        with col_btn:
+            run = st.button("🔎 Screen Wallet", type="primary", use_container_width=True)
 
-        with st.spinner("Contacting Elliptic API…"):
+        if run:
+            if not api_key or not api_secret:
+                st.error("Enter your API Key and Secret in the sidebar.")
+                st.stop()
+            if not address.strip().startswith("T"):
+                st.error("Enter a valid Tron address (starts with 'T').")
+                st.stop()
+            with st.spinner("Contacting Elliptic API…"):
+                try:
+                    result = screen_wallet(api_key.strip(), api_secret.strip(), address.strip())
+                    st.success("✅ Screening complete!")
+                    render_report(result, address.strip())
+                except requests.HTTPError:
+                    pass
+                except requests.ConnectionError:
+                    st.error("Connection error — check your network.")
+                except Exception as e:
+                    st.error(f"Unexpected error: {e}")
+                    st.exception(e)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # BULK SCAN
+    # ══════════════════════════════════════════════════════════════════════════
+    else:
+        st.markdown("""
+        <div style='background:rgba(99,102,241,0.07);border:1px solid rgba(99,102,241,0.2);
+                    border-radius:10px;padding:1rem 1.2rem;margin-bottom:1rem'>
+            <div style='color:#a5b4fc;font-weight:600;margin-bottom:0.3rem'>📂 Bulk Wallet Scan</div>
+            <div style='color:#64748b;font-size:0.82rem'>
+                Upload an Excel (.xlsx) or CSV file. The tool will look for a column named
+                <code style='color:#a5b4fc'>address</code>, <code style='color:#a5b4fc'>wallet</code>,
+                or <code style='color:#a5b4fc'>hash</code> (case-insensitive). One wallet per row.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        uploaded = st.file_uploader(
+            "Upload file", type=["xlsx", "xls", "csv"],
+            label_visibility="collapsed",
+        )
+
+        if uploaded:
+            # ── Parse file
             try:
-                result = screen_wallet(api_key.strip(), api_secret.strip(), address.strip())
-                st.success("✅ Screening complete!")
-                render_report(result, address.strip())
-            except requests.HTTPError:
-                pass
-            except requests.ConnectionError:
-                st.error("Connection error — check your network.")
+                if uploaded.name.endswith(".csv"):
+                    df_raw = pd.read_csv(uploaded)
+                else:
+                    df_raw = pd.read_excel(uploaded)
             except Exception as e:
-                st.error(f"Unexpected error: {e}")
-                st.exception(e)
+                st.error(f"Could not read file: {e}")
+                st.stop()
+
+            # ── Find address column
+            col_map = {c.lower().strip(): c for c in df_raw.columns}
+            addr_col = None
+            for candidate in ["address", "wallet", "hash", "wallet_address", "tron_address"]:
+                if candidate in col_map:
+                    addr_col = col_map[candidate]
+                    break
+
+            if addr_col is None:
+                st.error(
+                    f"Could not find an address column. "
+                    f"Columns found: **{', '.join(df_raw.columns)}**. "
+                    f"Please rename the wallet column to `address`, `wallet`, or `hash`."
+                )
+                st.stop()
+
+            addresses = (
+                df_raw[addr_col]
+                .dropna()
+                .astype(str)
+                .str.strip()
+                .drop_duplicates()
+                .tolist()
+            )
+            # Keep any extra columns from the original file (name, label, etc.)
+            extra_cols = [c for c in df_raw.columns if c != addr_col]
+
+            st.info(f"Found **{len(addresses)}** unique wallet address(es) in column `{addr_col}`.")
+
+            col_btn2, col_delay, col_spacer2 = st.columns([1, 1, 2])
+            with col_btn2:
+                run_bulk = st.button("🚀 Start Bulk Scan", type="primary", use_container_width=True)
+            with col_delay:
+                delay = st.number_input(
+                    "Delay between requests (s)",
+                    min_value=0.5, max_value=10.0, value=1.0, step=0.5,
+                    help="Add a delay to avoid Elliptic rate limits.",
+                )
+
+            if run_bulk:
+                if not api_key or not api_secret:
+                    st.error("Enter your API Key and Secret in the sidebar.")
+                    st.stop()
+
+                results_rows = []
+                progress_bar = st.progress(0)
+                status_text  = st.empty()
+                total = len(addresses)
+
+                for i, addr in enumerate(addresses):
+                    status_text.markdown(
+                        f"<div style='color:#94a3b8;font-size:0.85rem'>"
+                        f"Scanning {i+1}/{total}: <code>{addr}</code></div>",
+                        unsafe_allow_html=True,
+                    )
+                    progress_bar.progress((i + 1) / total)
+
+                    # Get extra columns from original row (first match)
+                    orig_row = df_raw[df_raw[addr_col].astype(str).str.strip() == addr]
+                    extra_vals = {c: orig_row.iloc[0][c] if not orig_row.empty else "" for c in extra_cols}
+
+                    if not addr.startswith("T"):
+                        row = {
+                            addr_col: addr,
+                            **extra_vals,
+                            "Risk Score":  "—",
+                            "Verdict":     "⚠️ Invalid Address",
+                            "Direction Source Risk": "—",
+                            "Direction Dest Risk":   "—",
+                            "Flagged Entities":      "—",
+                            "Triggered Rules":       "—",
+                            "Inflow (USD)":          "—",
+                            "Outflow (USD)":         "—",
+                            "Error":                 "Not a valid Tron address",
+                        }
+                        results_rows.append(row)
+                        continue
+
+                    try:
+                        data = screen_wallet(api_key.strip(), api_secret.strip(), addr)
+
+                        score      = data.get("risk_score")
+                        score_f    = float(score) if score is not None else None
+
+                        # Verdict
+                        if score_f is None:
+                            verdict = "❓ Unknown"
+                        elif score_f < 1:
+                            verdict = "✅ Clear"
+                        elif score_f < 4:
+                            verdict = "🟡 Low Risk"
+                        elif score_f < 7:
+                            verdict = "🟠 Medium Risk"
+                        else:
+                            verdict = "🔴 High Risk"
+
+                        # Directional scores
+                        rsd      = data.get("risk_score_detail") or {}
+                        src_risk = rsd.get("source")
+                        dst_risk = rsd.get("destination")
+
+                        # Inflow / outflow
+                        bi       = data.get("blockchain_info") or {}
+                        cluster  = bi.get("cluster") or {}
+                        inflow   = (cluster.get("inflow_value")  or {}).get("usd")
+                        outflow  = (cluster.get("outflow_value") or {}).get("usd")
+
+                        # Flagged entities from contributions
+                        contrib  = data.get("contributions") or {}
+                        flagged  = []
+                        for side in ["source", "destination"]:
+                            for c in (contrib.get(side) or []):
+                                if not isinstance(c, dict): continue
+                                ents = c.get("entities") or []
+                                ent  = ents[0] if ents and isinstance(ents[0], dict) else {}
+                                cat  = ent.get("category", "")
+                                if any(kw in cat for kw in ["Sanctioned", "Blacklist", "Gambling", "Darknet", "Scam", "Ransomware"]):
+                                    flagged.append(f"{ent.get('name','?')} ({cat})")
+
+                        # Triggered rules
+                        rules    = [r.get("rule_name", r.get("name","?"))
+                                    for r in (data.get("evaluation_detail", {}).get("source", []) or [])
+                                    + (data.get("evaluation_detail", {}).get("destination", []) or [])
+                                    if isinstance(r, dict) and r.get("risk_score", 0) > 0]
+
+                        row = {
+                            addr_col:                addr,
+                            **extra_vals,
+                            "Risk Score":            f"{score_f:.4f}" if score_f is not None else "—",
+                            "Verdict":               verdict,
+                            "Direction Source Risk":  f"{float(src_risk):.4f}" if src_risk is not None else "—",
+                            "Direction Dest Risk":    f"{float(dst_risk):.4f}" if dst_risk is not None else "—",
+                            "Inflow (USD)":           fmt_usd(inflow),
+                            "Outflow (USD)":          fmt_usd(outflow),
+                            "Flagged Entities":       "; ".join(set(flagged)) if flagged else "None",
+                            "Triggered Rules":        "; ".join(set(rules))   if rules   else "None",
+                            "Error":                  "",
+                        }
+
+                    except Exception as e:
+                        row = {
+                            addr_col:                addr,
+                            **extra_vals,
+                            "Risk Score":            "—",
+                            "Verdict":               "❌ Error",
+                            "Direction Source Risk":  "—",
+                            "Direction Dest Risk":    "—",
+                            "Inflow (USD)":           "—",
+                            "Outflow (USD)":          "—",
+                            "Flagged Entities":       "—",
+                            "Triggered Rules":        "—",
+                            "Error":                  str(e),
+                        }
+
+                    results_rows.append(row)
+                    if i < total - 1:
+                        time.sleep(delay)
+
+                status_text.empty()
+                progress_bar.empty()
+
+                results_df = pd.DataFrame(results_rows)
+
+                # ── Summary metrics
+                st.divider()
+                st.markdown("### 📊 Bulk Scan Results")
+                total_scanned = len(results_df)
+                clear_count   = (results_df["Verdict"] == "✅ Clear").sum()
+                flagged_count = results_df["Verdict"].isin(["🟡 Low Risk","🟠 Medium Risk","🔴 High Risk"]).sum()
+                error_count   = results_df["Verdict"].isin(["❌ Error","⚠️ Invalid Address"]).sum()
+
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Total Scanned",  total_scanned)
+                m2.metric("✅ Clear",        clear_count)
+                m3.metric("⚠️ Flagged",     flagged_count)
+                m4.metric("❌ Errors",       error_count)
+
+                # ── Colour-coded table
+                def style_verdict(val):
+                    colors = {
+                        "✅ Clear":       "color:#10b981;font-weight:600",
+                        "🟡 Low Risk":    "color:#eab308;font-weight:600",
+                        "🟠 Medium Risk": "color:#f97316;font-weight:600",
+                        "🔴 High Risk":   "color:#ef4444;font-weight:600",
+                        "❌ Error":        "color:#94a3b8",
+                        "⚠️ Invalid Address": "color:#94a3b8",
+                    }
+                    return colors.get(val, "")
+
+                styled = results_df.style.map(style_verdict, subset=["Verdict"])
+                st.dataframe(styled, use_container_width=True, hide_index=True)
+
+                # ── Export to Excel
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                    results_df.to_excel(writer, index=False, sheet_name="Screening Results")
+                output.seek(0)
+
+                st.download_button(
+                    label="⬇️ Download Results (.xlsx)",
+                    data=output,
+                    file_name=f"elliptic_bulk_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
 
 if __name__ == "__main__":
     main()

@@ -525,13 +525,19 @@ def main():
         page_icon="🔍",
         layout="wide",
     )
-    # ── Logo + title
-    col_logo, col_title = st.columns([1, 4])
-    with col_logo:
-        st.image("kleos_logo.png", use_column_width=True)
-    with col_title:
-        st.title("AML Wallet Screener")
-        st.caption("Powered by Elliptic · Tron / USDT · Real-time wallet exposure analysis")
+    # ── Logo + title inline
+    st.markdown("""
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:0.5rem">
+            <img src="https://raw.githubusercontent.com/YOUR_GITHUB_USER/YOUR_REPO/main/kleos_logo.png"
+                 style="height:40px;width:auto;object-fit:contain" />
+            <div>
+                <div style="font-size:1.6rem;font-weight:700;line-height:1.1">AML Wallet Screener</div>
+                <div style="font-size:0.8rem;color:gray;margin-top:2px">
+                    Powered by Elliptic · Tron / USDT · Real-time wallet exposure analysis
+                </div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
 
     api_key, api_secret, from_secrets = load_credentials()
 

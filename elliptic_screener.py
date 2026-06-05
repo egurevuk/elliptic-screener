@@ -525,8 +525,13 @@ def main():
         page_icon="🔍",
         layout="wide",
     )
-    st.title("🔍 Elliptic Wallet Screener")
-    st.caption("Full AML exposure report for Tron (TRC-20 / USDT) wallets via the Elliptic API.")
+    # ── Logo + title
+    col_logo, col_title = st.columns([1, 4])
+    with col_logo:
+        st.image("kleos_logo.png", use_column_width=True)
+    with col_title:
+        st.title("AML Wallet Screener")
+        st.caption("Powered by Elliptic · Tron / USDT · Real-time wallet exposure analysis")
 
     api_key, api_secret, from_secrets = load_credentials()
 

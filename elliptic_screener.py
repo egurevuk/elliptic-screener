@@ -85,10 +85,10 @@ def bool_icon(v):
 
 def risk_badge(score):
     if score is None: return "❓ Unknown", "#888888"
-    s = float(score)               # API returns score directly (0–10 scale)
-    if s >= 7:  return f"🔴 HIGH RISK ({s:.4f}/10)",   "#ff4b4b"
-    if s >= 4:  return f"🟠 MEDIUM RISK ({s:.4f}/10)", "#ffa500"
-    return           f"🟢 LOW RISK ({s:.4f}/10)",      "#21c354"
+    s = float(score)
+    if s >= 5:  return f"🔴 HIGH RISK ({s:.4f}/10)",   "#ff4b4b"
+    if s >= 1:  return f"🟠 MEDIUM RISK ({s:.4f}/10)", "#ffa500"
+    return           f"🟢 CLEAR ({s:.4f}/10)",         "#21c354"
 
 # ── Section: Header ───────────────────────────────────────────────────────────
 def render_header(data, address):
@@ -546,8 +546,18 @@ def main():
             try:
                 if uploaded.name.endswith(".csv"):
                     df_raw = pd.read_csv(uploaded)
+                elif uploaded.name.endswith(".xlsx"):
+                    df_raw = pd.read_excel(uploaded, engine="openpyxl")
                 else:
-                    df_raw = pd.read_excel(uploaded)
+                    df_raw = pd.read_excel(uploaded, engine="xlrd")
+            except ImportError as e:
+                missing = "openpyxl" if "openpyxl" in str(e) else "xlrd"
+                st.error(
+                    f"Missing dependency: `{missing}`. "
+                    f"Add it to your `requirements.txt` and redeploy, "
+                    f"or run `pip install {missing}` locally."
+                )
+                st.stop()
             except Exception as e:
                 st.error(f"Could not read file: {e}")
                 st.stop()
@@ -641,9 +651,7 @@ def main():
                             verdict = "❓ Unknown"
                         elif score_f < 1:
                             verdict = "✅ Clear"
-                        elif score_f < 4:
-                            verdict = "🟡 Low Risk"
-                        elif score_f < 7:
+                        elif score_f < 5:
                             verdict = "🟠 Medium Risk"
                         else:
                             verdict = "🔴 High Risk"
@@ -720,7 +728,7 @@ def main():
                 st.markdown("### 📊 Bulk Scan Results")
                 total_scanned = len(results_df)
                 clear_count   = (results_df["Verdict"] == "✅ Clear").sum()
-                flagged_count = results_df["Verdict"].isin(["🟡 Low Risk","🟠 Medium Risk","🔴 High Risk"]).sum()
+                flagged_count = results_df["Verdict"].isin(["🟠 Medium Risk", "🔴 High Risk"]).sum()
                 error_count   = results_df["Verdict"].isin(["❌ Error","⚠️ Invalid Address"]).sum()
 
                 m1, m2, m3, m4 = st.columns(4)
@@ -760,4 +768,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    

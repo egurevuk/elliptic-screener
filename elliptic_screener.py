@@ -50,10 +50,73 @@ def screen_wallet(api_key, api_secret, address):
     body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     hdrs = build_headers(api_key, api_secret, "POST", WALLET_PATH, body)
     r    = requests.post(BASE_URL + WALLET_PATH, headers=hdrs, data=body.encode(), timeout=60)
+    if r.status_code == 404:
+        raise WalletNotFoundError()
     if not r.ok:
         st.error(f"HTTP {r.status_code} — `{r.text}`")
         r.raise_for_status()
     return r.json()
+
+# ── Custom exceptions ─────────────────────────────────────────────────────────
+class WalletNotFoundError(Exception):
+    pass
+
+# ── Not found message ─────────────────────────────────────────────────────────
+def render_not_found(address):
+    st.warning(
+        f"**Wallet not found on the Tron blockchain.**\n\n"
+        f"The address `{address}` has no transaction history and has never received funds. "
+        f"It either doesn't exist yet or is completely empty."
+    )
+    st.markdown("---")
+    st.markdown("#### 💡 Want to receive USDT (TRC-20) to this address?")
+    st.markdown(
+        "You need to fund the wallet first by withdrawing USDT from a crypto exchange. "
+        "Here are the most popular ones that support Tron (TRC-20) withdrawals:"
+    )
+
+    exchanges = [
+        {
+            "name": "Binance",
+            "url":  "https://www.binance.com/en/register",
+            "desc": "World's largest exchange by volume. Fast TRC-20 withdrawals, low fees.",
+            "icon": "🟡",
+        },
+        {
+            "name": "Bybit",
+            "url":  "https://www.bybit.com/en/register",
+            "desc": "Popular derivatives & spot exchange. Simple onboarding, instant USDT withdrawals.",
+            "icon": "🟠",
+        },
+        {
+            "name": "OKX",
+            "url":  "https://www.okx.com/join",
+            "desc": "Top-tier exchange with broad USDT support across all major networks including TRC-20.",
+            "icon": "⚫",
+        },
+        {
+            "name": "Kraken",
+            "url":  "https://www.kraken.com/sign-up",
+            "desc": "US-regulated exchange known for strong security and fiat on-ramps.",
+            "icon": "🔵",
+        },
+        {
+            "name": "KuCoin",
+            "url":  "https://www.kucoin.com/register",
+            "desc": "Wide altcoin selection with easy TRC-20 USDT withdrawals and low minimums.",
+            "icon": "🟢",
+        },
+    ]
+
+    cols = st.columns(len(exchanges))
+    for col, ex in zip(cols, exchanges):
+        with col:
+            st.markdown(
+                f"**{ex['icon']} {ex['name']}**\n\n"
+                f"<div style='font-size:0.8rem;color:gray;margin-bottom:0.5rem'>{ex['desc']}</div>",
+                unsafe_allow_html=True,
+            )
+            st.link_button(f"Open account →", ex["url"], use_container_width=True)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def fmt_usd(v):
@@ -517,6 +580,8 @@ def main():
                     result = screen_wallet(api_key.strip(), api_secret.strip(), address.strip())
                     st.success("✅ Screening complete!")
                     render_report(result, address.strip())
+                except WalletNotFoundError:
+                    render_not_found(address.strip())
                 except requests.HTTPError:
                     pass
                 except requests.ConnectionError:
@@ -699,6 +764,20 @@ def main():
                             "Error":                  "",
                         }
 
+                    except WalletNotFoundError:
+                        row = {
+                            addr_col:                addr,
+                            **extra_vals,
+                            "Risk Score":            "—",
+                            "Verdict":               "⬜ Not Found",
+                            "Direction Source Risk":  "—",
+                            "Direction Dest Risk":    "—",
+                            "Inflow (USD)":           "—",
+                            "Outflow (USD)":          "—",
+                            "Flagged Entities":       "—",
+                            "Triggered Rules":        "—",
+                            "Error":                  "Wallet not on blockchain / empty",
+                        }
                     except Exception as e:
                         row = {
                             addr_col:                addr,
@@ -729,7 +808,7 @@ def main():
                 total_scanned = len(results_df)
                 clear_count   = (results_df["Verdict"] == "✅ Clear").sum()
                 flagged_count = results_df["Verdict"].isin(["🟠 Medium Risk", "🔴 High Risk"]).sum()
-                error_count   = results_df["Verdict"].isin(["❌ Error","⚠️ Invalid Address"]).sum()
+                error_count   = results_df["Verdict"].isin(["❌ Error", "⚠️ Invalid Address", "⬜ Not Found"]).sum()
 
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("Total Scanned",  total_scanned)

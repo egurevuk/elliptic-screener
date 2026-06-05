@@ -528,7 +528,7 @@ def main():
     # ── Logo + title inline
     st.markdown("""
         <div style="display:flex;align-items:center;gap:16px;margin-bottom:0.5rem">
-            <img src="https://raw.githubusercontent.com/YOUR_GITHUB_USER/YOUR_REPO/main/kleos_logo.png"
+            <img src="https://raw.githubusercontent.com/egurevuk/elliptic-screener/main/kleos_logo.png"
                  style="height:40px;width:auto;object-fit:contain" />
             <div>
                 <div style="font-size:1.6rem;font-weight:700;line-height:1.1">AML Wallet Screener</div>

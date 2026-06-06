@@ -70,9 +70,20 @@ def login_wall():
     return st.session_state.user
 
 def _render_login_page():
-    sb  = get_supabase()
-    url = st.secrets["app"]["redirect_url"]
+    sb   = get_supabase()
+    url  = st.secrets["app"]["redirect_url"]
     logo = st.secrets["app"].get("logo_url", "")
+
+    # Debug: show what OAuth URL Supabase generates (so we can check redirect_uri)
+    try:
+        test = sb.auth.sign_in_with_oauth({
+            "provider": "google",
+            "options": {"redirect_to": url, "scopes": "openid email profile"},
+        })
+        with st.expander("🐛 Debug: OAuth URL (check redirect_uri param)"):
+            st.code(test.url, language="text")
+    except Exception as ex:
+        st.error(f"Debug error: {ex}")
 
     st.set_page_config(page_title="Kleos AML Screener", page_icon="🔍", layout="centered")
 
@@ -92,18 +103,19 @@ def _render_login_page():
                 result = sb.auth.sign_in_with_oauth({
                     "provider": "google",
                     "options": {
-                        # redirect_to must point to the Supabase callback —
-                        # Supabase then forwards to the site URL we set in the dashboard
-                        "redirect_to": f"https://wjyiwevherfllekoxufn.supabase.co/auth/v1/callback",
-                        "scopes": "email profile",
+                        "redirect_to": st.secrets["app"]["redirect_url"],
+                        "scopes": "openid email profile",
+                        "query_params": {"access_type": "offline", "prompt": "consent"},
                     },
                 })
                 st.markdown(
                     f'<meta http-equiv="refresh" content="0; url={result.url}">',
                     unsafe_allow_html=True,
                 )
+                st.markdown(f"[Click here if not redirected automatically]({result.url})")
             except Exception as e:
                 st.error(f"Could not initiate login: {e}")
+                st.code(str(e))
 
         st.markdown(" ")
         st.caption("By signing in you agree to use this tool for legitimate compliance purposes only.")

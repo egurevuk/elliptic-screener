@@ -3,10 +3,20 @@ Elliptic Wallet Screener — Full Detail Report
 Screens Tron USDT wallets using the Elliptic Synchronous Screening API.
 
 Install:
-    pip install streamlit requests pandas openpyxl
+    pip install streamlit requests pandas openpyxl supabase
 
-Run:
-    streamlit run elliptic_screener.py
+secrets.toml:
+    [elliptic]
+    api_key    = "your-elliptic-api-key"
+    api_secret = "your-elliptic-api-secret"
+
+    [supabase]
+    url      = "https://wjyiwevherfllekoxufn.supabase.co"
+    anon_key = "your-legacy-anon-jwt-eyJ..."
+
+    [app]
+    admin_email = "your@email.com"
+    logo_url    = "https://raw.githubusercontent.com/egurevuk/elliptic-screener/main/kleos_logo.png"
 """
 
 import hashlib, hmac, json, time, base64, uuid, io
@@ -15,14 +25,16 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+# ── LINE ADDED 1: import auth module ─────────────────────────────────────────
+from auth import require_login, show_signout_button, get_supabase
+
+# ── Elliptic auth ─────────────────────────────────────────────────────────────
 BASE_URL    = "https://aml-api.elliptic.co"
 WALLET_PATH = "/v2/wallet/synchronous"
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
 def build_headers(api_key, api_secret, method, path, body):
-    timestamp    = str(int(time.time() * 1000))
-    message      = timestamp + method.upper() + path + body
+    timestamp = str(int(time.time() * 1000))
+    message   = timestamp + method.upper() + path + body
     try:
         secret_bytes = base64.b64decode(api_secret)
     except Exception:
@@ -36,14 +48,12 @@ def build_headers(api_key, api_secret, method, path, body):
         "x-access-timestamp": timestamp,
     }
 
+class WalletNotFoundError(Exception):
+    pass
+
 def screen_wallet(api_key, api_secret, address):
     payload = {
-        "subject": {
-            "asset":      "USDT",
-            "blockchain": "tron",
-            "type":       "address",
-            "hash":       address,
-        },
+        "subject": {"asset": "USDT", "blockchain": "tron", "type": "address", "hash": address},
         "type":               "wallet_exposure",
         "customer_reference": f"screen-{uuid.uuid4().hex[:8]}",
     }
@@ -57,66 +67,68 @@ def screen_wallet(api_key, api_secret, address):
         r.raise_for_status()
     return r.json()
 
-# ── Custom exceptions ─────────────────────────────────────────────────────────
-class WalletNotFoundError(Exception):
-    pass
+# ── Credential loader ─────────────────────────────────────────────────────────
+def load_credentials():
+    try:
+        if "elliptic" in st.secrets:
+            key    = st.secrets["elliptic"].get("api_key") or st.secrets["elliptic"].get("API_KEY")
+            secret = st.secrets["elliptic"].get("api_secret") or st.secrets["elliptic"].get("API_SECRET")
+            if key and secret:
+                return key, secret, True
+        key    = st.secrets.get("ELLIPTIC_API_KEY")    or st.secrets.get("elliptic_api_key")
+        secret = st.secrets.get("ELLIPTIC_API_SECRET") or st.secrets.get("elliptic_api_secret")
+        if key and secret:
+            return key, secret, True
+    except Exception:
+        pass
+    return None, None, False
 
-# ── Not found message ─────────────────────────────────────────────────────────
-def render_not_found(address):
-    st.warning(
-        f"**Wallet not found on the Tron blockchain.**\n\n"
-        f"The address `{address}` has no transaction history and has never received funds. "
-        f"It either doesn't exist yet or is completely empty."
-    )
-    st.markdown("---")
-    st.markdown("#### 💡 Want to receive USDT (TRC-20) to this address?")
-    st.markdown(
-        "You need to fund the wallet first by withdrawing USDT from a crypto exchange. "
-        "Here are the most popular ones that support Tron (TRC-20) withdrawals:"
-    )
+# ── Usage logging ─────────────────────────────────────────────────────────────
+def log_usage(email: str, wallet: str, scan_type: str,
+              wallets_count: int = 1, risk_score=None, verdict: str = None):
+    try:
+        get_supabase().table("usage_log").insert({
+            "user_id":       email,
+            "user_email":    email,
+            "wallet":        wallet[:100] if wallet else None,
+            "scan_type":     scan_type,
+            "wallets_count": wallets_count,
+            "risk_score":    float(risk_score) if risk_score is not None else None,
+            "verdict":       verdict,
+        }).execute()
+    except Exception:
+        pass
 
-    exchanges = [
-        {
-            "name": "Binance",
-            "url":  "https://www.binance.com/en/register",
-            "desc": "World's largest exchange by volume. Fast TRC-20 withdrawals, low fees.",
-            "icon": "🟡",
-        },
-        {
-            "name": "Bybit",
-            "url":  "https://www.bybit.com/en/register",
-            "desc": "Popular derivatives & spot exchange. Simple onboarding, instant USDT withdrawals.",
-            "icon": "🟠",
-        },
-        {
-            "name": "OKX",
-            "url":  "https://www.okx.com/join",
-            "desc": "Top-tier exchange with broad USDT support across all major networks including TRC-20.",
-            "icon": "⚫",
-        },
-        {
-            "name": "Kraken",
-            "url":  "https://www.kraken.com/sign-up",
-            "desc": "US-regulated exchange known for strong security and fiat on-ramps.",
-            "icon": "🔵",
-        },
-        {
-            "name": "KuCoin",
-            "url":  "https://www.kucoin.com/register",
-            "desc": "Wide altcoin selection with easy TRC-20 USDT withdrawals and low minimums.",
-            "icon": "🟢",
-        },
-    ]
-
-    cols = st.columns(len(exchanges))
-    for col, ex in zip(cols, exchanges):
-        with col:
-            st.markdown(
-                f"**{ex['icon']} {ex['name']}**\n\n"
-                f"<div style='font-size:0.8rem;color:gray;margin-bottom:0.5rem'>{ex['desc']}</div>",
-                unsafe_allow_html=True,
-            )
-            st.link_button(f"Open account →", ex["url"], use_container_width=True)
+# ── Admin stats panel ─────────────────────────────────────────────────────────
+def render_admin_stats():
+    try:
+        rows = (
+            get_supabase().table("usage_log")
+            .select("user_email, scan_type, wallets_count, verdict, scanned_at")
+            .order("scanned_at", desc=True)
+            .limit(500)
+            .execute()
+        )
+        if not rows.data:
+            st.info("No usage data yet.")
+            return
+        df = pd.DataFrame(rows.data)
+        df["scanned_at"] = pd.to_datetime(df["scanned_at"]).dt.strftime("%Y-%m-%d %H:%M")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Scans",     len(df))
+        m2.metric("Unique Users",    df["user_email"].nunique())
+        m3.metric("Wallets Scanned", int(df["wallets_count"].sum()))
+        m4.metric("Flagged",         int(df["verdict"].isin(["🟠 Medium Risk","🔴 High Risk"]).sum()))
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        out = io.BytesIO()
+        with pd.ExcelWriter(out, engine="openpyxl") as w:
+            df.to_excel(w, index=False, sheet_name="Usage Log")
+        out.seek(0)
+        st.download_button("⬇️ Export Usage Log", data=out,
+            file_name=f"usage_log_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    except Exception as e:
+        st.error(f"Could not load stats: {e}")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def fmt_usd(v):
@@ -136,8 +148,8 @@ def fmt_ts(v):
         return str(v)
 
 def safe_str(v):
-    if v is None:              return "—"
-    if isinstance(v, bool):    return "Yes" if v else "No"
+    if v is None:                   return "—"
+    if isinstance(v, bool):         return "Yes" if v else "No"
     if isinstance(v, (dict, list)): return json.dumps(v)
     return str(v)
 
@@ -151,24 +163,44 @@ def risk_badge(score):
     s = float(score)
     if s >= 5:  return f"🔴 HIGH RISK ({s:.4f}/10)",   "#ff4b4b"
     if s >= 1:  return f"🟠 MEDIUM RISK ({s:.4f}/10)", "#ffa500"
-    return           f"🟢 CLEAR ({s:.4f}/10)",         "#21c354"
+    return           f"🟢 CLEAR ({s:.4f}/10)",          "#21c354"
 
-# ── Section: Header ───────────────────────────────────────────────────────────
+def render_not_found(address):
+    st.warning(
+        f"**Wallet not found on the Tron blockchain.**\n\n"
+        f"`{address}` has no transaction history. It either doesn't exist yet or is completely empty."
+    )
+    st.markdown("---")
+    st.markdown("#### 💡 Want to receive USDT (TRC-20) to this address?")
+    exchanges = [
+        {"name": "Binance",  "url": "https://www.binance.com/en/register",  "desc": "World's largest exchange. Fast TRC-20 withdrawals.",  "icon": "🟡"},
+        {"name": "Bybit",    "url": "https://www.bybit.com/en/register",    "desc": "Simple onboarding, instant USDT withdrawals.",       "icon": "🟠"},
+        {"name": "OKX",      "url": "https://www.okx.com/join",             "desc": "Broad USDT support across all major networks.",      "icon": "⚫"},
+        {"name": "Kraken",   "url": "https://www.kraken.com/sign-up",       "desc": "US-regulated, strong security, fiat on-ramps.",      "icon": "🔵"},
+        {"name": "KuCoin",   "url": "https://www.kucoin.com/register",      "desc": "Easy TRC-20 withdrawals and low minimums.",          "icon": "🟢"},
+    ]
+    cols = st.columns(len(exchanges))
+    for col, ex in zip(cols, exchanges):
+        with col:
+            st.markdown(f"**{ex['icon']} {ex['name']}**\n\n<div style='font-size:0.8rem;color:gray;margin-bottom:0.5rem'>{ex['desc']}</div>", unsafe_allow_html=True)
+            st.link_button("Open account →", ex["url"], use_container_width=True)
+
+# ── Report sections ───────────────────────────────────────────────────────────
 def render_header(data, address):
-    score        = data.get("risk_score")           # 0–1 float
+    score        = data.get("risk_score")
     label, color = risk_badge(score)
+    rsd          = data.get("risk_score_detail") or {}
 
     st.markdown(f"""
     <div style="background:{color}22;border-left:6px solid {color};
                 padding:16px 20px;border-radius:8px;margin-bottom:1rem">
         <h2 style="margin:0;color:{color}">{label}</h2>
-        <p style="margin:4px 0 0;font-size:0.9rem;color:#aaa">
+        <p style="margin:4px 0 0;font-size:0.9rem;color:#888">
             Report:&nbsp;<code>{data.get('id','N/A')}</code>&nbsp;|&nbsp;
             Screened:&nbsp;{fmt_ts(data.get('created_at'))}&nbsp;|&nbsp;
-            Analysed:&nbsp;{fmt_ts(data.get('analysed_at'))}&nbsp;|&nbsp;
             Status:&nbsp;<b>{data.get('process_status','—')}</b>
         </p>
-        <p style="margin:4px 0 0;font-size:0.85rem;color:#aaa">
+        <p style="margin:4px 0 0;font-size:0.85rem;color:#888">
             Wallet:&nbsp;<code>{address}</code>
         </p>
     </div>
@@ -178,41 +210,20 @@ def render_header(data, address):
         st.progress(min(float(score) / 10.0, 1.0))
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Risk Score (0–10)",  f"{float(score):.4f}" if score is not None else "—")
-    c2.metric("Asset Tier",         safe_str(data.get("asset_tier")))
-    c3.metric("Workflow Status",    safe_str(data.get("workflow_status")))
-    c4.metric("Process Status",     safe_str(data.get("process_status")))
+    c1.metric("Risk Score (0–10)",   f"{float(score):.4f}" if score is not None else "—")
+    c2.metric("Asset Tier",          safe_str(data.get("asset_tier")))
+    c3.metric("📥 Source Risk",      f"{float(rsd['source']):.4f}" if rsd.get("source") is not None else "—")
+    c4.metric("📤 Destination Risk", f"{float(rsd['destination']):.4f}" if rsd.get("destination") is not None else "—")
 
-    # Directional risk split
-    rsd = data.get("risk_score_detail") or {}
-    if isinstance(rsd, dict) and rsd:
-        st.markdown("#### Risk Score by Direction")
-        src_score = rsd.get("source")
-        dst_score = rsd.get("destination")
-        d1, d2 = st.columns(2)
-        d1.metric("📥 Source (Incoming) Risk",     f"{float(src_score):.4f}/10" if src_score is not None else "—")
-        d2.metric("📤 Destination (Outgoing) Risk", f"{float(dst_score):.4f}/10" if dst_score is not None else "—")
-
-# ── Section: Cluster Entities ─────────────────────────────────────────────────
 def render_cluster_entities(data):
     st.markdown("### 🔗 Wallet Cluster Identity")
-
-    # cluster_entities sits at top level (parallel to analysed_by in real response)
     entities = []
     if isinstance(data.get("cluster_entities"), list):
         entities = [e for e in data["cluster_entities"] if isinstance(e, dict)]
     elif isinstance(data.get("analysed_by"), dict):
-        ab = data["analysed_by"]
-        if isinstance(ab.get("cluster_entities"), list):
-            entities = [e for e in ab["cluster_entities"] if isinstance(e, dict)]
+        entities = [e for e in data["analysed_by"].get("cluster_entities", []) if isinstance(e, dict)]
 
     bi_cluster = (data.get("blockchain_info") or {}).get("cluster") or {}
-
-    if not entities and not bi_cluster:
-        st.info("No cluster identity data returned.")
-        return
-
-    # Blockchain cluster financials
     if bi_cluster:
         st.markdown("#### 💹 Cluster Financial Summary")
         inflow  = (bi_cluster.get("inflow_value")  or {}).get("usd")
@@ -220,268 +231,150 @@ def render_cluster_entities(data):
         f1, f2, f3 = st.columns(3)
         f1.metric("Total Inflow (USD)",  fmt_usd(inflow))
         f2.metric("Total Outflow (USD)", fmt_usd(outflow))
-        try:
-            net = float(inflow or 0) - float(outflow or 0)
-            f3.metric("Net Flow (USD)", fmt_usd(net))
-        except:
-            f3.metric("Net Flow (USD)", "—")
+        try:    f3.metric("Net Flow (USD)", fmt_usd(float(inflow or 0) - float(outflow or 0)))
+        except: f3.metric("Net Flow (USD)", "—")
 
-    # Entity table
     if entities:
         st.markdown("#### 🏷️ Identified Entities")
-        rows = []
-        for e in entities:
-            rows.append({
-                "Name":            e.get("name", "—"),
-                "Category":        e.get("category", "—"),
-                "Is VASP":         bool_icon(e.get("is_vasp")),
-                "Is Primary":      bool_icon(e.get("is_primary_entity")),
-                "After Sanction Date": bool_icon(e.get("is_after_sanction_date")),
-                "Entity ID":       e.get("entity_id", "—"),
-            })
+        rows = [{"Name": e.get("name","—"), "Category": e.get("category","—"),
+                 "Is VASP": bool_icon(e.get("is_vasp")), "Is Primary": bool_icon(e.get("is_primary_entity")),
+                 "After Sanction Date": bool_icon(e.get("is_after_sanction_date"))} for e in entities]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-# ── Evaluation detail rules renderer ─────────────────────────────────────────
 def render_eval_rules(rules, direction_label):
-    """Render evaluation_detail source/destination rule list."""
     if not rules:
         st.info(f"No {direction_label} evaluation rules.")
         return
-
     for rule in rules:
-        if not isinstance(rule, dict):
-            continue
-        rule_name  = rule.get("rule_name", "Unnamed Rule")
-        risk_score = rule.get("risk_score", 0)
-        risk_10    = float(risk_score) * 10 if risk_score else 0
-        rule_type  = rule.get("rule_type", "—")
-
-        color = "#ff4b4b" if risk_10 >= 7 else ("#ffa500" if risk_10 >= 4 else "#21c354")
-        with st.expander(
-            f"{'🔴' if risk_10>=7 else '🟠' if risk_10>=4 else '🟢'} "
-            f"**{rule_name}** — Risk Score: {risk_10:.4f}/10 | Type: {rule_type}"
-        ):
-            matched = rule.get("matched_elements") or []
-            if not matched:
-                st.info("No matched elements.")
-                continue
-
-            for elem in matched:
-                if not isinstance(elem, dict):
-                    continue
-
-                category = elem.get("category", "Unknown Category")
-                cat_pct  = elem.get("contribution_percentage", 0)
-                cat_usd  = (elem.get("contribution_value") or {}).get("usd")
-                indir_pct= elem.get("indirect_percentage", 0)
-                indir_usd= (elem.get("indirect_value") or {}).get("usd")
-
-                st.markdown(f"**Category: {category}**")
+        if not isinstance(rule, dict): continue
+        risk_10 = float(rule.get("risk_score", 0)) * 10
+        icon    = "🔴" if risk_10 >= 5 else ("🟠" if risk_10 >= 1 else "🟢")
+        with st.expander(f"{icon} **{rule.get('rule_name','Unnamed')}** — Score: {risk_10:.4f}/10"):
+            for elem in (rule.get("matched_elements") or []):
+                if not isinstance(elem, dict): continue
+                st.markdown(f"**Category: {elem.get('category','?')}**")
                 m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Category Contribution %", fmt_pct(cat_pct))
-                m2.metric("Category Value (USD)",     fmt_usd(cat_usd))
-                m3.metric("Indirect %",               fmt_pct(indir_pct))
-                m4.metric("Indirect Value (USD)",     fmt_usd(indir_usd))
-
-                # Individual entity contributions
-                contributions = elem.get("contributions") or []
-                contrib_dicts = [c for c in contributions if isinstance(c, dict)]
+                m1.metric("Contribution %",  fmt_pct(elem.get("contribution_percentage")))
+                m2.metric("Value (USD)",      fmt_usd((elem.get("contribution_value") or {}).get("usd")))
+                m3.metric("Indirect %",       fmt_pct(elem.get("indirect_percentage")))
+                m4.metric("Indirect USD",     fmt_usd((elem.get("indirect_value") or {}).get("usd")))
+                contrib_dicts = [c for c in (elem.get("contributions") or []) if isinstance(c, dict)]
                 if contrib_dicts:
-                    st.markdown("**Flagged Entities within this category:**")
+                    st.markdown("**Flagged Entities:**")
                     rows = []
                     for c in contrib_dicts:
                         rt = c.get("risk_triggers") or {}
                         rows.append({
-                            "Entity":              c.get("entity", "—"),
-                            "Contribution %":      fmt_pct(c.get("contribution_percentage")),
-                            "Contribution (USD)":  fmt_usd((c.get("contribution_value") or {}).get("usd")),
-                            "Indirect %":          fmt_pct(c.get("indirect_percentage")),
-                            "Indirect (USD)":      fmt_usd((c.get("indirect_value") or {}).get("usd")),
-                            "Min Hops":            safe_str(c.get("min_number_of_hops")),
-                            "Screened Addr":       bool_icon(c.get("is_screened_address")),
-                            "Risk Category":       rt.get("category", "—"),
-                            "Sanctioned":          bool_icon(rt.get("is_sanctioned")),
-                            "Country":             ", ".join(rt.get("country", [])) if rt.get("country") else "—",
+                            "Entity":             c.get("entity","—"),
+                            "Contribution %":     fmt_pct(c.get("contribution_percentage")),
+                            "Contribution (USD)": fmt_usd((c.get("contribution_value") or {}).get("usd")),
+                            "Indirect %":         fmt_pct(c.get("indirect_percentage")),
+                            "Min Hops":           safe_str(c.get("min_number_of_hops")),
+                            "Risk Category":      rt.get("category","—"),
+                            "Sanctioned":         bool_icon(rt.get("is_sanctioned")),
+                            "Country":            ", ".join(rt.get("country",[])) if rt.get("country") else "—",
                         })
                     df = pd.DataFrame(rows)
                     st.dataframe(df, use_container_width=True, hide_index=True)
-
-                    # Highlight sanctioned entities
                     sanctioned = [r for r in rows if r["Sanctioned"] == "⛔ Yes"]
                     if sanctioned:
-                        st.error(
-                            "⛔ **Sanctioned entities in this category:**\n" +
-                            "\n".join(f"- {r['Entity']} ({r['Contribution %']} | {r['Contribution (USD)']})"
-                                      for r in sanctioned)
-                        )
+                        st.error("⛔ **Sanctioned:** " + " | ".join(r["Entity"] for r in sanctioned))
                 st.divider()
 
-# ── Section: Evaluation Detail ────────────────────────────────────────────────
 def render_evaluation_detail(data):
-    st.markdown("### 🔬 Evaluation Detail — Rule Breakdown")
-    st.caption(
-        "Each AML rule that matched this wallet, with the specific entities and categories "
-        "that triggered it, exposure amounts, and hop distance from the screened wallet."
-    )
+    st.markdown("### 🔬 Evaluation Detail")
     ev = data.get("evaluation_detail") or {}
     if not isinstance(ev, dict):
         st.info("No evaluation detail returned.")
         return
-
-    src_rules = [r for r in (ev.get("source") or []) if isinstance(r, dict)]
-    dst_rules = [r for r in (ev.get("destination") or []) if isinstance(r, dict)]
-
-    if not src_rules and not dst_rules:
+    src = [r for r in (ev.get("source") or []) if isinstance(r, dict)]
+    dst = [r for r in (ev.get("destination") or []) if isinstance(r, dict)]
+    if not src and not dst:
         st.success("✅ No evaluation rules matched.")
         return
+    t1, t2 = st.tabs([f"📥 Source ({len(src)} rules)", f"📤 Destination ({len(dst)} rules)"])
+    with t1: render_eval_rules(src, "source")
+    with t2: render_eval_rules(dst, "destination")
 
-    t1, t2 = st.tabs([
-        f"📥 Source / Incoming ({len(src_rules)} rule{'s' if len(src_rules)!=1 else ''})",
-        f"📤 Destination / Outgoing ({len(dst_rules)} rule{'s' if len(dst_rules)!=1 else ''})",
-    ])
-    with t1: render_eval_rules(src_rules, "source")
-    with t2: render_eval_rules(dst_rules, "destination")
-
-# ── Contributions renderer ────────────────────────────────────────────────────
 def render_contribution_side(items, label):
-    """Render contributions.source or contributions.destination."""
     items = [i for i in (items or []) if isinstance(i, dict)]
     if not items:
         st.info(f"No {label} contributions.")
         return
-
     rows = []
     for c in items:
-        ents = c.get("entities") or []
-        ent  = ents[0] if ents and isinstance(ents[0], dict) else {}
+        ent  = ((c.get("entities") or [{}])[0]) if isinstance((c.get("entities") or [{}])[0], dict) else {}
         rows.append({
-            "Entity":              ent.get("name", "—"),
-            "Category":            ent.get("category", "—"),
-            "Is VASP":             bool_icon(ent.get("is_vasp")),
-            "Contribution %":      fmt_pct(c.get("contribution_percentage")),
-            "Contribution (USD)":  fmt_usd((c.get("contribution_value") or {}).get("usd")),
-            "Counterparty %":      fmt_pct(c.get("counterparty_percentage")),
-            "Counterparty (USD)":  fmt_usd((c.get("counterparty_value") or {}).get("usd")),
-            "Indirect %":          fmt_pct(c.get("indirect_percentage")),
-            "Indirect (USD)":      fmt_usd((c.get("indirect_value") or {}).get("usd")),
-            "Min Hops":            safe_str(c.get("min_number_of_hops")),
-            "Screened Addr":       bool_icon(c.get("is_screened_address")),
+            "Entity":             ent.get("name","—"),
+            "Category":           ent.get("category","—"),
+            "Is VASP":            bool_icon(ent.get("is_vasp")),
+            "Contribution %":     fmt_pct(c.get("contribution_percentage")),
+            "Contribution (USD)": fmt_usd((c.get("contribution_value") or {}).get("usd")),
+            "Counterparty %":     fmt_pct(c.get("counterparty_percentage")),
+            "Counterparty (USD)": fmt_usd((c.get("counterparty_value") or {}).get("usd")),
+            "Indirect %":         fmt_pct(c.get("indirect_percentage")),
+            "Indirect (USD)":     fmt_usd((c.get("indirect_value") or {}).get("usd")),
+            "Min Hops":           safe_str(c.get("min_number_of_hops")),
         })
-
-    df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-    # Highlight sanctioned / blacklisted
-    flagged = [
-        r for r in rows
-        if any(kw in r["Category"] for kw in ["Sanctioned", "Blacklist", "Gambling", "Darknet", "Scam", "Ransomware"])
-    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    flagged = [r for r in rows if any(kw in r["Category"] for kw in ["Sanctioned","Blacklist","Gambling","Darknet","Scam","Ransomware"])]
     if flagged:
-        st.warning(
-            f"⚠️ **{len(flagged)} flagged counterparty(ies) in {label} flow:**\n" +
-            "\n".join(
-                f"- **{r['Entity']}** ({r['Category']}) — {r['Contribution %']} | {r['Contribution (USD)']}"
-                for r in flagged
-            )
-        )
-
-    # Bar chart — top contributors by USD
-    chart_rows = []
+        st.warning("⚠️ **Flagged:** " + " | ".join(f"{r['Entity']} ({r['Category']})" for r in flagged))
+    chart = []
     for c in items:
-        ents = c.get("entities") or []
-        ent  = ents[0] if ents and isinstance(ents[0], dict) else {}
-        try:
-            usd = float((c.get("contribution_value") or {}).get("usd") or 0)
-        except:
-            usd = 0
+        ent = ((c.get("entities") or [{}])[0])
+        name = ent.get("name","?") if isinstance(ent, dict) else "?"
+        try:    usd = float((c.get("contribution_value") or {}).get("usd") or 0)
+        except: usd = 0
         if usd > 0:
-            chart_rows.append({"Entity": ent.get("name", "Unknown"), "USD": usd})
-    if chart_rows:
-        cdf = pd.DataFrame(chart_rows).sort_values("USD", ascending=False).head(15)
-        st.markdown(f"**{label} — Top Counterparties by USD Value**")
+            chart.append({"Entity": name, "USD": usd})
+    if chart:
+        cdf = pd.DataFrame(chart).sort_values("USD", ascending=False).head(15)
+        st.markdown(f"**{label} — Top Counterparties (USD)**")
         st.bar_chart(cdf.set_index("Entity")["USD"])
 
-# ── Section: Contributions ────────────────────────────────────────────────────
 def render_contributions(data):
     st.markdown("### 💡 Counterparty Contributions")
-    st.caption(
-        "All counterparties whose funds have flowed through this wallet, "
-        "with their percentage contribution and USD value — both direct (counterparty) "
-        "and indirect (via hops)."
-    )
     contrib = data.get("contributions") or {}
     if not isinstance(contrib, dict):
         st.info("No contributions data returned.")
         return
+    t1, t2 = st.tabs([f"📥 Source ({len(contrib.get('source') or [])} entities)",
+                      f"📤 Destination ({len(contrib.get('destination') or [])} entities)"])
+    with t1: render_contribution_side(contrib.get("source"), "Source")
+    with t2: render_contribution_side(contrib.get("destination"), "Destination")
 
-    src  = contrib.get("source") or []
-    dst  = contrib.get("destination") or []
-
-    t1, t2 = st.tabs([
-        f"📥 Source / Incoming ({len(src)} entities)",
-        f"📤 Destination / Outgoing ({len(dst)} entities)",
-    ])
-    with t1: render_contribution_side(src, "Source")
-    with t2: render_contribution_side(dst, "Destination")
-
-# ── Section: Triggered Rules ──────────────────────────────────────────────────
 def render_triggered_rules(data):
     st.markdown("### 🚨 Triggered AML Rules")
     rules = [r for r in (data.get("triggered_rules") or []) if isinstance(r, dict)]
     if not rules:
-        st.success("✅ No AML rules triggered for this wallet.")
+        st.success("✅ No AML rules triggered.")
         return
-    st.warning(f"{len(rules)} rule(s) triggered")
     for r in rules:
         with st.expander(f"⚠️ **{r.get('name','Unnamed')}** — Score: {r.get('risk_score','N/A')}"):
             st.json(r)
 
-# ── Section: Metadata ─────────────────────────────────────────────────────────
 def render_metadata(data, address):
     st.markdown("### 📋 Screening Metadata")
-    subject  = data.get("subject", {})
-    customer = data.get("customer", {})
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**Subject**")
-        st.json(subject)
-    with c2:
-        st.markdown("**Customer Reference**")
-        st.json(customer)
-
     rows = [
-        ("Screening ID",      data.get("screening_id")),
-        ("Report ID",         data.get("id")),
-        ("Type",              data.get("type")),
-        ("Asset Tier",        data.get("asset_tier")),
-        ("Process Status",    data.get("process_status")),
-        ("Workflow Status",   data.get("workflow_status")),
-        ("Screening Source",  data.get("screening_source")),
-        ("Team ID",           data.get("team_id")),
-        ("Created At",        fmt_ts(data.get("created_at"))),
-        ("Updated At",        fmt_ts(data.get("updated_at"))),
-        ("Analysed At",       fmt_ts(data.get("analysed_at"))),
-        ("Error",             safe_str(data.get("error"))),
+        ("Screening ID",    data.get("screening_id")),
+        ("Report ID",       data.get("id")),
+        ("Type",            data.get("type")),
+        ("Asset Tier",      data.get("asset_tier")),
+        ("Process Status",  data.get("process_status")),
+        ("Workflow Status", data.get("workflow_status")),
+        ("Screening Source",data.get("screening_source")),
+        ("Team ID",         data.get("team_id")),
+        ("Created At",      fmt_ts(data.get("created_at"))),
+        ("Analysed At",     fmt_ts(data.get("analysed_at"))),
     ]
-    st.dataframe(
-        pd.DataFrame([{"Field": k, "Value": safe_str(v)} for k, v in rows]),
-        use_container_width=True, hide_index=True,
-    )
+    st.dataframe(pd.DataFrame([{"Field": k, "Value": safe_str(v)} for k, v in rows]),
+                 use_container_width=True, hide_index=True)
 
-# ── Main report ───────────────────────────────────────────────────────────────
 def render_report(data, address):
     st.divider()
     render_header(data, address)
-
-    tabs = st.tabs([
-        "🔬 Evaluation Detail",
-        "💡 Contributions",
-        "🔗 Cluster Identity",
-        "🚨 Triggered Rules",
-        "📋 Metadata",
-        "📄 Raw JSON",
-    ])
+    tabs = st.tabs(["🔬 Evaluation","💡 Contributions","🔗 Cluster","🚨 Rules","📋 Metadata","📄 Raw JSON"])
     with tabs[0]: render_evaluation_detail(data)
     with tabs[1]: render_contributions(data)
     with tabs[2]: render_cluster_entities(data)
@@ -491,107 +384,84 @@ def render_report(data, address):
         st.markdown("### 📄 Full Raw API Response")
         st.json(data)
 
-# ── Streamlit UI ──────────────────────────────────────────────────────────────
-def load_credentials():
-    """
-    Load credentials from st.secrets in multiple fallback formats:
-      1. [elliptic] section:  api_key / api_secret
-      2. Flat keys:           ELLIPTIC_API_KEY / ELLIPTIC_API_SECRET
-    Returns (api_key, api_secret, from_secrets).
-    """
-    try:
-        # Format 1: nested [elliptic] section
-        if "elliptic" in st.secrets:
-            key    = st.secrets["elliptic"].get("api_key") or st.secrets["elliptic"].get("API_KEY")
-            secret = st.secrets["elliptic"].get("api_secret") or st.secrets["elliptic"].get("API_SECRET")
-            if key and secret:
-                return key, secret, True
-
-        # Format 2: flat top-level keys
-        key    = st.secrets.get("ELLIPTIC_API_KEY")    or st.secrets.get("elliptic_api_key")
-        secret = st.secrets.get("ELLIPTIC_API_SECRET") or st.secrets.get("elliptic_api_secret")
-        if key and secret:
-            return key, secret, True
-
-    except Exception:
-        pass
-
-    return None, None, False
-
-
+# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    st.set_page_config(
-        page_title="Elliptic Wallet Screener",
-        page_icon="🔍",
-        layout="wide",
-    )
-    # ── Logo + title inline
-    st.markdown("""
-        <div style="display:flex;align-items:center;gap:16px;margin-bottom:0.5rem">
-            <img src="https://raw.githubusercontent.com/egurevuk/elliptic-screener/main/kleos_logo.png"
-                 style="height:40px;width:auto;object-fit:contain" />
-            <div>
-                <div style="font-size:1.6rem;font-weight:700;line-height:1.1">AML Wallet Screener</div>
-                <div style="font-size:0.8rem;color:gray;margin-top:2px">
-                    Powered by Elliptic · Tron / USDT · Real-time wallet exposure analysis
-                </div>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
+    st.set_page_config(page_title="Kleos AML Screener", page_icon="🔍", layout="wide")
 
+    # ── LINE ADDED 2: auth gate — must be before anything else ────────────────
+    user_email = require_login()
+
+    admin_email = st.secrets["app"].get("admin_email", "")
+    logo        = st.secrets["app"].get("logo_url", "")
     api_key, api_secret, from_secrets = load_credentials()
 
+    # ── Sidebar
     with st.sidebar:
-        st.header("🔍 Elliptic Screener")
+        if logo:
+            st.image(logo, width=120)
         st.divider()
-
+        st.caption(f"👤 {user_email}")
+        # ── LINE ADDED 3: sign out button ─────────────────────────────────────
+        show_signout_button()
+        st.divider()
         if from_secrets:
             st.success("🔑 API credentials loaded")
         else:
             st.subheader("🔑 API Credentials")
-            st.warning("Add credentials to `secrets.toml` to skip this step.")
-            api_key    = st.text_input("API Key",    type="password", placeholder="your-api-key")
-            api_secret = st.text_input("API Secret", type="password", placeholder="your-api-secret")
-
+            st.warning("Add credentials to `secrets.toml`.")
+            api_key    = st.text_input("API Key",    type="password")
+            api_secret = st.text_input("API Secret", type="password")
         st.divider()
         st.caption("Blockchain: Tron (TRC-20)")
         st.caption("Asset: USDT")
         st.markdown("[📖 Elliptic Docs](https://developers.elliptic.co/docs/quick-start-sdks)")
+        if user_email == admin_email:
+            with st.expander("📊 Admin: Usage Stats"):
+                render_admin_stats()
 
-    # ── Mode toggle ───────────────────────────────────────────────────────────
-    mode = st.radio(
-        "Screening mode",
-        ["🔍 Single Wallet", "📂 Bulk Scan (Excel / CSV)"],
-        horizontal=True,
-        label_visibility="collapsed",
-    )
+    # ── Header
+    st.markdown(f"""
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:0.5rem">
+            {"<img src='" + logo + "' style='height:36px;width:auto'/>" if logo else ""}
+            <div>
+                <div style="font-size:1.5rem;font-weight:700;line-height:1.1">AML Wallet Screener</div>
+                <div style="font-size:0.8rem;color:gray">Powered by Elliptic · Tron / USDT · Real-time exposure analysis</div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # ── Mode toggle
+    mode = st.radio("Mode", ["🔍 Single Wallet", "📂 Bulk Scan (Excel / CSV)"],
+                    horizontal=True, label_visibility="collapsed")
     st.divider()
 
     # ══════════════════════════════════════════════════════════════════════════
     # SINGLE WALLET
     # ══════════════════════════════════════════════════════════════════════════
     if mode == "🔍 Single Wallet":
-        st.markdown("<div style='color:#94a3b8;font-size:0.78rem;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:0.3rem'>Wallet Address</div>", unsafe_allow_html=True)
-        address = st.text_input(
-            "Wallet Address",
-            placeholder="e.g. TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs",
-            label_visibility="collapsed",
-        )
+        address = st.text_input("Tron Wallet Address",
+                                placeholder="e.g. TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs")
         run = st.button("🔎 Screen Wallet", type="primary")
 
         if run:
             if not api_key or not api_secret:
-                st.error("Enter your API Key and Secret in the sidebar.")
+                st.error("Enter your API credentials in the sidebar.")
                 st.stop()
             if not address.strip().startswith("T"):
                 st.error("Enter a valid Tron address (starts with 'T').")
                 st.stop()
             with st.spinner("Contacting Elliptic API…"):
                 try:
-                    result = screen_wallet(api_key.strip(), api_secret.strip(), address.strip())
+                    result  = screen_wallet(api_key.strip(), api_secret.strip(), address.strip())
+                    score_f = result.get("risk_score")
+                    verdict = ("✅ Clear"          if score_f is not None and float(score_f) < 1
+                               else "🟠 Medium Risk" if score_f is not None and float(score_f) < 5
+                               else "🔴 High Risk"   if score_f is not None else "❓ Unknown")
+                    log_usage(user_email, address.strip(), "single", risk_score=score_f, verdict=verdict)
                     st.success("✅ Screening complete!")
                     render_report(result, address.strip())
                 except WalletNotFoundError:
+                    log_usage(user_email, address.strip(), "single", verdict="⬜ Not Found")
                     render_not_found(address.strip())
                 except requests.HTTPError:
                     pass
@@ -605,20 +475,10 @@ def main():
     # BULK SCAN
     # ══════════════════════════════════════════════════════════════════════════
     else:
-        st.markdown("""
-        **📂 Bulk Wallet Scan**
-
-        Upload an Excel (.xlsx) or CSV file. The tool will look for a column named
-        `address`, `wallet`, or `hash` (case-insensitive). One wallet per row.
-        """)
-
-        uploaded = st.file_uploader(
-            "Upload file", type=["xlsx", "xls", "csv"],
-            label_visibility="collapsed",
-        )
+        st.markdown("**Upload an Excel (.xlsx) or CSV file.** Column must be named `address`, `wallet`, or `hash`.")
+        uploaded = st.file_uploader("Upload file", type=["xlsx","xls","csv"], label_visibility="collapsed")
 
         if uploaded:
-            # ── Parse file
             try:
                 if uploaded.name.endswith(".csv"):
                     df_raw = pd.read_csv(uploaded)
@@ -628,233 +488,137 @@ def main():
                     df_raw = pd.read_excel(uploaded, engine="xlrd")
             except ImportError as e:
                 missing = "openpyxl" if "openpyxl" in str(e) else "xlrd"
-                st.error(
-                    f"Missing dependency: `{missing}`. "
-                    f"Add it to your `requirements.txt` and redeploy, "
-                    f"or run `pip install {missing}` locally."
-                )
+                st.error(f"Missing dependency: `{missing}`. Add to `requirements.txt`.")
                 st.stop()
             except Exception as e:
                 st.error(f"Could not read file: {e}")
                 st.stop()
 
-            # ── Find address column
-            col_map = {c.lower().strip(): c for c in df_raw.columns}
-            addr_col = None
-            for candidate in ["address", "wallet", "hash", "wallet_address", "tron_address"]:
-                if candidate in col_map:
-                    addr_col = col_map[candidate]
-                    break
-
+            col_map  = {c.lower().strip(): c for c in df_raw.columns}
+            addr_col = next((col_map[c] for c in ["address","wallet","hash","wallet_address","tron_address"] if c in col_map), None)
             if addr_col is None:
-                st.error(
-                    f"Could not find an address column. "
-                    f"Columns found: **{', '.join(df_raw.columns)}**. "
-                    f"Please rename the wallet column to `address`, `wallet`, or `hash`."
-                )
+                st.error(f"No address column found. Columns: **{', '.join(df_raw.columns)}**")
                 st.stop()
 
-            addresses = (
-                df_raw[addr_col]
-                .dropna()
-                .astype(str)
-                .str.strip()
-                .drop_duplicates()
-                .tolist()
-            )
-            # Keep any extra columns from the original file (name, label, etc.)
+            addresses  = df_raw[addr_col].dropna().astype(str).str.strip().drop_duplicates().tolist()
             extra_cols = [c for c in df_raw.columns if c != addr_col]
+            st.info(f"Found **{len(addresses)}** unique wallet address(es).")
 
-            st.info(f"Found **{len(addresses)}** unique wallet address(es) in column `{addr_col}`.")
-
-            col_btn2, col_delay, col_spacer2 = st.columns([1, 1, 2])
-            with col_btn2:
+            col_btn, col_delay, _ = st.columns([1,1,2])
+            with col_btn:
                 run_bulk = st.button("🚀 Start Bulk Scan", type="primary", use_container_width=True)
             with col_delay:
-                delay = st.number_input(
-                    "Delay between requests (s)",
-                    min_value=0.5, max_value=10.0, value=1.0, step=0.5,
-                    help="Add a delay to avoid Elliptic rate limits.",
-                )
+                delay = st.number_input("Delay (s)", min_value=0.5, max_value=10.0, value=1.0, step=0.5)
 
             if run_bulk:
                 if not api_key or not api_secret:
-                    st.error("Enter your API Key and Secret in the sidebar.")
+                    st.error("Enter API credentials in the sidebar.")
                     st.stop()
 
                 results_rows = []
-                progress_bar = st.progress(0)
-                status_text  = st.empty()
-                total = len(addresses)
+                prog   = st.progress(0)
+                status = st.empty()
+                total  = len(addresses)
 
                 for i, addr in enumerate(addresses):
-                    status_text.markdown(
-                        f"<div style='color:#94a3b8;font-size:0.85rem'>"
-                        f"Scanning {i+1}/{total}: <code>{addr}</code></div>",
-                        unsafe_allow_html=True,
-                    )
-                    progress_bar.progress((i + 1) / total)
+                    status.markdown(f"Scanning {i+1}/{total}: `{addr}`")
+                    prog.progress((i+1) / total)
 
-                    # Get extra columns from original row (first match)
-                    orig_row = df_raw[df_raw[addr_col].astype(str).str.strip() == addr]
-                    extra_vals = {c: orig_row.iloc[0][c] if not orig_row.empty else "" for c in extra_cols}
+                    orig       = df_raw[df_raw[addr_col].astype(str).str.strip() == addr]
+                    extra_vals = {c: orig.iloc[0][c] if not orig.empty else "" for c in extra_cols}
 
                     if not addr.startswith("T"):
-                        row = {
-                            addr_col: addr,
-                            **extra_vals,
-                            "Risk Score":  "—",
-                            "Verdict":     "⚠️ Invalid Address",
-                            "Direction Source Risk": "—",
-                            "Direction Dest Risk":   "—",
-                            "Flagged Entities":      "—",
-                            "Triggered Rules":       "—",
-                            "Inflow (USD)":          "—",
-                            "Outflow (USD)":         "—",
-                            "Error":                 "Not a valid Tron address",
-                        }
-                        results_rows.append(row)
+                        verdict = "⚠️ Invalid Address"
+                        results_rows.append({addr_col: addr, **extra_vals,
+                            "Risk Score":"—","Verdict":verdict,"Source Risk":"—","Dest Risk":"—",
+                            "Inflow (USD)":"—","Outflow (USD)":"—","Flagged Entities":"—",
+                            "Triggered Rules":"—","Error":"Not a valid Tron address"})
+                        log_usage(user_email, addr, "bulk", verdict=verdict)
                         continue
 
                     try:
-                        data = screen_wallet(api_key.strip(), api_secret.strip(), addr)
-
-                        score      = data.get("risk_score")
-                        score_f    = float(score) if score is not None else None
-
-                        # Verdict
-                        if score_f is None:
-                            verdict = "❓ Unknown"
-                        elif score_f < 1:
-                            verdict = "✅ Clear"
-                        elif score_f < 5:
-                            verdict = "🟠 Medium Risk"
-                        else:
-                            verdict = "🔴 High Risk"
-
-                        # Directional scores
-                        rsd      = data.get("risk_score_detail") or {}
-                        src_risk = rsd.get("source")
-                        dst_risk = rsd.get("destination")
-
-                        # Inflow / outflow
-                        bi       = data.get("blockchain_info") or {}
-                        cluster  = bi.get("cluster") or {}
-                        inflow   = (cluster.get("inflow_value")  or {}).get("usd")
-                        outflow  = (cluster.get("outflow_value") or {}).get("usd")
-
-                        # Flagged entities from contributions
-                        contrib  = data.get("contributions") or {}
-                        flagged  = []
-                        for side in ["source", "destination"]:
+                        data    = screen_wallet(api_key.strip(), api_secret.strip(), addr)
+                        score   = data.get("risk_score")
+                        score_f = float(score) if score is not None else None
+                        verdict = ("✅ Clear"          if score_f is not None and score_f < 1
+                                   else "🟠 Medium Risk" if score_f is not None and score_f < 5
+                                   else "🔴 High Risk"   if score_f is not None else "❓ Unknown")
+                        rsd     = data.get("risk_score_detail") or {}
+                        bi      = (data.get("blockchain_info") or {}).get("cluster") or {}
+                        inflow  = (bi.get("inflow_value")  or {}).get("usd")
+                        outflow = (bi.get("outflow_value") or {}).get("usd")
+                        contrib = data.get("contributions") or {}
+                        flagged = []
+                        for side in ["source","destination"]:
                             for c in (contrib.get(side) or []):
                                 if not isinstance(c, dict): continue
-                                ents = c.get("entities") or []
-                                ent  = ents[0] if ents and isinstance(ents[0], dict) else {}
-                                cat  = ent.get("category", "")
-                                if any(kw in cat for kw in ["Sanctioned", "Blacklist", "Gambling", "Darknet", "Scam", "Ransomware"]):
+                                ent = ((c.get("entities") or [{}])[0])
+                                cat = ent.get("category","") if isinstance(ent, dict) else ""
+                                if any(kw in cat for kw in ["Sanctioned","Blacklist","Gambling","Darknet","Scam","Ransomware"]):
                                     flagged.append(f"{ent.get('name','?')} ({cat})")
-
-                        # Triggered rules
-                        rules    = [r.get("rule_name", r.get("name","?"))
-                                    for r in (data.get("evaluation_detail", {}).get("source", []) or [])
-                                    + (data.get("evaluation_detail", {}).get("destination", []) or [])
-                                    if isinstance(r, dict) and r.get("risk_score", 0) > 0]
-
-                        row = {
-                            addr_col:                addr,
-                            **extra_vals,
-                            "Risk Score":            f"{score_f:.4f}" if score_f is not None else "—",
-                            "Verdict":               verdict,
-                            "Direction Source Risk":  f"{float(src_risk):.4f}" if src_risk is not None else "—",
-                            "Direction Dest Risk":    f"{float(dst_risk):.4f}" if dst_risk is not None else "—",
-                            "Inflow (USD)":           fmt_usd(inflow),
-                            "Outflow (USD)":          fmt_usd(outflow),
-                            "Flagged Entities":       "; ".join(set(flagged)) if flagged else "None",
-                            "Triggered Rules":        "; ".join(set(rules))   if rules   else "None",
-                            "Error":                  "",
-                        }
+                        ev    = data.get("evaluation_detail") or {}
+                        rules = list({r.get("rule_name","?") for r in
+                                      (ev.get("source") or []) + (ev.get("destination") or [])
+                                      if isinstance(r, dict) and r.get("risk_score", 0) > 0})
+                        results_rows.append({addr_col: addr, **extra_vals,
+                            "Risk Score":  f"{score_f:.4f}" if score_f is not None else "—",
+                            "Verdict":     verdict,
+                            "Source Risk": f"{float(rsd['source']):.4f}" if rsd.get("source") is not None else "—",
+                            "Dest Risk":   f"{float(rsd['destination']):.4f}" if rsd.get("destination") is not None else "—",
+                            "Inflow (USD)":  fmt_usd(inflow), "Outflow (USD)": fmt_usd(outflow),
+                            "Flagged Entities": "; ".join(set(flagged)) if flagged else "None",
+                            "Triggered Rules":  "; ".join(rules) if rules else "None",
+                            "Error": ""})
+                        log_usage(user_email, addr, "bulk", risk_score=score_f, verdict=verdict)
 
                     except WalletNotFoundError:
-                        row = {
-                            addr_col:                addr,
-                            **extra_vals,
-                            "Risk Score":            "—",
-                            "Verdict":               "⬜ Not Found",
-                            "Direction Source Risk":  "—",
-                            "Direction Dest Risk":    "—",
-                            "Inflow (USD)":           "—",
-                            "Outflow (USD)":          "—",
-                            "Flagged Entities":       "—",
-                            "Triggered Rules":        "—",
-                            "Error":                  "Wallet not on blockchain / empty",
-                        }
-                    except Exception as e:
-                        row = {
-                            addr_col:                addr,
-                            **extra_vals,
-                            "Risk Score":            "—",
-                            "Verdict":               "❌ Error",
-                            "Direction Source Risk":  "—",
-                            "Direction Dest Risk":    "—",
-                            "Inflow (USD)":           "—",
-                            "Outflow (USD)":          "—",
-                            "Flagged Entities":       "—",
-                            "Triggered Rules":        "—",
-                            "Error":                  str(e),
-                        }
+                        verdict = "⬜ Not Found"
+                        results_rows.append({addr_col: addr, **extra_vals,
+                            "Risk Score":"—","Verdict":verdict,"Source Risk":"—","Dest Risk":"—",
+                            "Inflow (USD)":"—","Outflow (USD)":"—","Flagged Entities":"—",
+                            "Triggered Rules":"—","Error":"Wallet not on blockchain / empty"})
+                        log_usage(user_email, addr, "bulk", verdict=verdict)
 
-                    results_rows.append(row)
+                    except Exception as e:
+                        verdict = "❌ Error"
+                        results_rows.append({addr_col: addr, **extra_vals,
+                            "Risk Score":"—","Verdict":verdict,"Source Risk":"—","Dest Risk":"—",
+                            "Inflow (USD)":"—","Outflow (USD)":"—","Flagged Entities":"—",
+                            "Triggered Rules":"—","Error": str(e)})
+                        log_usage(user_email, addr, "bulk", verdict=verdict)
+
                     if i < total - 1:
                         time.sleep(delay)
 
-                status_text.empty()
-                progress_bar.empty()
+                status.empty()
+                prog.empty()
 
                 results_df = pd.DataFrame(results_rows)
-
-                # ── Summary metrics
                 st.divider()
                 st.markdown("### 📊 Bulk Scan Results")
-                total_scanned = len(results_df)
-                clear_count   = (results_df["Verdict"] == "✅ Clear").sum()
-                flagged_count = results_df["Verdict"].isin(["🟠 Medium Risk", "🔴 High Risk"]).sum()
-                error_count   = results_df["Verdict"].isin(["❌ Error", "⚠️ Invalid Address", "⬜ Not Found"]).sum()
 
                 m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Total Scanned",  total_scanned)
-                m2.metric("✅ Clear",        clear_count)
-                m3.metric("⚠️ Flagged",     flagged_count)
-                m4.metric("❌ Errors",       error_count)
+                m1.metric("Total Scanned", len(results_df))
+                m2.metric("✅ Clear",       (results_df["Verdict"] == "✅ Clear").sum())
+                m3.metric("⚠️ Flagged",    results_df["Verdict"].isin(["🟠 Medium Risk","🔴 High Risk"]).sum())
+                m4.metric("❌ Errors",      results_df["Verdict"].isin(["❌ Error","⚠️ Invalid Address","⬜ Not Found"]).sum())
 
-                # ── Colour-coded table
                 def style_verdict(val):
-                    colors = {
-                        "✅ Clear":       "color:#10b981;font-weight:600",
-                        "🟡 Low Risk":    "color:#eab308;font-weight:600",
-                        "🟠 Medium Risk": "color:#f97316;font-weight:600",
-                        "🔴 High Risk":   "color:#ef4444;font-weight:600",
-                        "❌ Error":        "color:#94a3b8",
-                        "⚠️ Invalid Address": "color:#94a3b8",
-                    }
-                    return colors.get(val, "")
+                    return {"✅ Clear":"color:green;font-weight:600",
+                            "🟠 Medium Risk":"color:orange;font-weight:600",
+                            "🔴 High Risk":"color:red;font-weight:600"}.get(val,"color:gray")
 
-                styled = results_df.style.map(style_verdict, subset=["Verdict"])
-                st.dataframe(styled, use_container_width=True, hide_index=True)
+                st.dataframe(results_df.style.map(style_verdict, subset=["Verdict"]),
+                             use_container_width=True, hide_index=True)
 
-                # ── Export to Excel
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                    results_df.to_excel(writer, index=False, sheet_name="Screening Results")
-                output.seek(0)
-
-                st.download_button(
-                    label="⬇️ Download Results (.xlsx)",
-                    data=output,
-                    file_name=f"elliptic_bulk_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                out = io.BytesIO()
+                with pd.ExcelWriter(out, engine="openpyxl") as w:
+                    results_df.to_excel(w, index=False, sheet_name="Screening Results")
+                out.seek(0)
+                st.download_button("⬇️ Download Results (.xlsx)", data=out,
+                    file_name=f"elliptic_bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                )
+                    use_container_width=True)
 
 if __name__ == "__main__":
     main()

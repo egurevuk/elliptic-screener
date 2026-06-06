@@ -4,7 +4,7 @@ from supabase import create_client
 
 SUPABASE_URL = "https://wjyiwevherfllekoxufn.supabase.co"
 APP_URL      = "https://elliptic-screener.streamlit.app/"
-GOOGLE_LOGIN_URL = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to={APP_URL}"
+GOOGLE_LOGIN_URL = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=https://egurevuk.github.io/elliptic-screener/callback.html"
 
 
 @st.cache_resource

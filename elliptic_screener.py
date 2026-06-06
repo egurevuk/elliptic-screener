@@ -50,12 +50,18 @@ def login_wall():
     params = st.query_params
     if "code" in params and not st.session_state.user:
         try:
-            session = sb.auth.exchange_code_for_session({"auth_code": params["code"]})
+            code = params["code"]
+            # Support both old and new Supabase Python client versions
+            try:
+                session = sb.auth.exchange_code_for_session({"auth_code": code})
+            except TypeError:
+                session = sb.auth.exchange_code_for_session(code)
             st.session_state.user = session.user
             st.query_params.clear()
             st.rerun()
         except Exception as e:
             st.error(f"Login failed: {e}")
+            st.info("Try clearing your browser cookies and signing in again.")
 
     if not st.session_state.user:
         _render_login_page()

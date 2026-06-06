@@ -1,10 +1,13 @@
 # auth.py
 import streamlit as st
+import extra_streamlit_components as stx
 from supabase import create_client
 
-SUPABASE_URL = "https://wjyiwevherfllekoxufn.supabase.co"
-APP_URL      = "https://elliptic-screener.streamlit.app/"
-GOOGLE_LOGIN_URL = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=https://egurevuk.github.io/elliptic-screener/callback.html"
+SUPABASE_URL     = "https://wjyiwevherfllekoxufn.supabase.co"
+APP_URL          = "https://elliptic-screener.streamlit.app/"
+GOOGLE_LOGIN_URL = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to={APP_URL}"
+COOKIE_NAME      = "kleos_refresh_token"
+COOKIE_MAX_AGE   = 60 * 24 * 60 * 60  # 60 days in seconds
 
 
 @st.cache_resource
@@ -15,26 +18,39 @@ def get_supabase():
     )
 
 
+@st.cache_resource
+def get_cookie_manager():
+    return stx.CookieManager(key="kleos_cookie_manager")
+
+
 def require_login():
+    """
+    Call once at the top of main(), AFTER st.set_page_config().
+    Returns the authenticated user's email string.
+    Persists login across page refreshes via a browser cookie.
+    """
     sb = get_supabase()
+    cm = get_cookie_manager()
 
     if "user"          not in st.session_state: st.session_state.user          = None
     if "refresh_token" not in st.session_state: st.session_state.refresh_token = None
 
-    # ── Handle ?code= (PKCE flow) ─────────────────────────────────────────────
+    # ── Step 1: Handle ?code= (PKCE flow) ────────────────────────────────────
     code = st.query_params.get("code")
     if code and not st.session_state.user:
         try:
             res = sb.auth.exchange_code_for_session({"auth_code": code})
             st.session_state.user          = res.user
             st.session_state.refresh_token = res.session.refresh_token
+            # Save refresh token in cookie so it survives page refreshes
+            cm.set(COOKIE_NAME, res.session.refresh_token, max_age=COOKIE_MAX_AGE)
         except Exception as e:
-            st.error(f"Login failed (code): {e}")
+            st.error(f"Login failed: {e}")
         st.query_params.clear()
         st.rerun()
         return
 
-    # ── Handle ?access_token= (implicit flow — extracted from hash by redirect page)
+    # ── Step 2: Handle ?access_token= (implicit flow) ────────────────────────
     access_token  = st.query_params.get("access_token")
     refresh_token = st.query_params.get("refresh_token")
     if access_token and not st.session_state.user:
@@ -42,23 +58,39 @@ def require_login():
             res = sb.auth.set_session(access_token, refresh_token or "")
             st.session_state.user          = res.user
             st.session_state.refresh_token = res.session.refresh_token
+            cm.set(COOKIE_NAME, res.session.refresh_token, max_age=COOKIE_MAX_AGE)
         except Exception as e:
-            st.error(f"Login failed (token): {e}")
+            st.error(f"Login failed: {e}")
         st.query_params.clear()
         st.rerun()
         return
 
-    # ── Restore from refresh token ────────────────────────────────────────────
+    # ── Step 3: Try restoring from session_state refresh token ────────────────
     if not st.session_state.user and st.session_state.refresh_token:
         try:
             res = sb.auth.refresh_session(st.session_state.refresh_token)
             st.session_state.user          = res.user
             st.session_state.refresh_token = res.session.refresh_token
+            cm.set(COOKIE_NAME, res.session.refresh_token, max_age=COOKIE_MAX_AGE)
         except Exception:
             st.session_state.user          = None
             st.session_state.refresh_token = None
 
-    # ── Show login if not authenticated ───────────────────────────────────────
+    # ── Step 4: Try restoring from cookie (survives page refresh) ─────────────
+    if not st.session_state.user:
+        cookie_token = cm.get(COOKIE_NAME)
+        if cookie_token:
+            try:
+                res = sb.auth.refresh_session(cookie_token)
+                st.session_state.user          = res.user
+                st.session_state.refresh_token = res.session.refresh_token
+                # Rotate the cookie with new refresh token
+                cm.set(COOKIE_NAME, res.session.refresh_token, max_age=COOKIE_MAX_AGE)
+            except Exception:
+                # Cookie expired — delete it and show login
+                cm.delete(COOKIE_NAME)
+
+    # ── Step 5: Show login if still not authenticated ─────────────────────────
     if not st.session_state.user:
         _show_login_page()
         st.stop()
@@ -68,11 +100,13 @@ def require_login():
 
 
 def show_signout_button():
+    cm = get_cookie_manager()
     if st.button("Sign out", use_container_width=True):
         try:
             get_supabase().auth.sign_out()
         except Exception:
             pass
+        cm.delete(COOKIE_NAME)
         st.session_state.user          = None
         st.session_state.refresh_token = None
         st.rerun()

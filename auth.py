@@ -1,10 +1,18 @@
 # auth.py
 import streamlit as st
-import streamlit.components.v1 as components
 from supabase import create_client
 
-SUPABASE_URL     = "https://wjyiwevherfllekoxufn.supabase.co"
-GOOGLE_LOGIN_URL = f"{SUPABASE_URL}/auth/v1/authorize?provider=google"
+SUPABASE_URL = "https://wjyiwevherfllekoxufn.supabase.co"
+APP_URL      = "https://elliptic-screener.streamlit.app/"
+
+# Use PKCE flow explicitly — returns ?code= instead of #access_token=
+GOOGLE_LOGIN_URL = (
+    f"{SUPABASE_URL}/auth/v1/authorize"
+    "?provider=google"
+    "&response_type=code"
+    f"&redirect_to={APP_URL}"
+    "&code_challenge_method=s256"
+)
 
 
 @st.cache_resource
@@ -16,22 +24,12 @@ def get_supabase():
 
 
 def require_login():
-    """
-    Call once at the top of main(), AFTER st.set_page_config().
-    Returns the authenticated user's email string.
-
-    Handles both flows:
-    - PKCE: ?code= query param  (ideal)
-    - Implicit: #access_token=  (Supabase fallback — extracted via JS)
-    """
     sb = get_supabase()
 
-    if "user" not in st.session_state:
-        st.session_state.user = None
-    if "refresh_token" not in st.session_state:
-        st.session_state.refresh_token = None
+    if "user"          not in st.session_state: st.session_state.user          = None
+    if "refresh_token" not in st.session_state: st.session_state.refresh_token = None
 
-    # ── Step 1a: Handle ?code= (PKCE flow) ───────────────────────────────────
+    # ── Handle ?code= (PKCE flow) ─────────────────────────────────────────────
     code = st.query_params.get("code")
     if code and not st.session_state.user:
         try:
@@ -44,7 +42,7 @@ def require_login():
         st.rerun()
         return
 
-    # ── Step 1b: Handle ?access_token= (extracted from hash by JS below) ─────
+    # ── Handle ?access_token= (implicit flow fallback) ────────────────────────
     access_token  = st.query_params.get("access_token")
     refresh_token = st.query_params.get("refresh_token")
     if access_token and not st.session_state.user:
@@ -58,7 +56,7 @@ def require_login():
         st.rerun()
         return
 
-    # ── Step 2: Restore session from refresh token ────────────────────────────
+    # ── Restore from refresh token ────────────────────────────────────────────
     if not st.session_state.user and st.session_state.refresh_token:
         try:
             res = sb.auth.refresh_session(st.session_state.refresh_token)
@@ -68,7 +66,7 @@ def require_login():
             st.session_state.user          = None
             st.session_state.refresh_token = None
 
-    # ── Step 3: Show login page if not authenticated ──────────────────────────
+    # ── Show login if still not authenticated ─────────────────────────────────
     if not st.session_state.user:
         _show_login_page()
         st.stop()
@@ -90,29 +88,6 @@ def show_signout_button():
 
 def _show_login_page():
     logo = st.secrets["app"].get("logo_url", "")
-
-    # ── JS: extract #access_token from URL hash and redirect as ?access_token=
-    # This runs in the browser, converts the hash fragment into query params
-    # that Python/Streamlit can read via st.query_params
-    components.html("""
-        <script>
-        (function() {
-            var hash = window.top.location.hash;
-            if (hash && hash.includes('access_token')) {
-                var params = new URLSearchParams(hash.substring(1));
-                var access_token  = params.get('access_token');
-                var refresh_token = params.get('refresh_token') || '';
-                if (access_token) {
-                    var base = window.top.location.origin + window.top.location.pathname;
-                    window.top.location.href = base
-                        + '?access_token=' + encodeURIComponent(access_token)
-                        + '&refresh_token=' + encodeURIComponent(refresh_token);
-                }
-            }
-        })();
-        </script>
-    """, height=0)
-
     _, col, _ = st.columns([1, 2, 1])
     with col:
         if logo:

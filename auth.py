@@ -4,15 +4,7 @@ from supabase import create_client
 
 SUPABASE_URL = "https://wjyiwevherfllekoxufn.supabase.co"
 APP_URL      = "https://elliptic-screener.streamlit.app/"
-
-# Use PKCE flow explicitly — returns ?code= instead of #access_token=
-GOOGLE_LOGIN_URL = (
-    f"{SUPABASE_URL}/auth/v1/authorize"
-    "?provider=google"
-    "&response_type=code"
-    f"&redirect_to={APP_URL}"
-    "&code_challenge_method=s256"
-)
+GOOGLE_LOGIN_URL = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to={APP_URL}"
 
 
 @st.cache_resource
@@ -37,12 +29,12 @@ def require_login():
             st.session_state.user          = res.user
             st.session_state.refresh_token = res.session.refresh_token
         except Exception as e:
-            st.error(f"Login failed: {e}")
+            st.error(f"Login failed (code): {e}")
         st.query_params.clear()
         st.rerun()
         return
 
-    # ── Handle ?access_token= (implicit flow fallback) ────────────────────────
+    # ── Handle ?access_token= (implicit flow — extracted from hash by redirect page)
     access_token  = st.query_params.get("access_token")
     refresh_token = st.query_params.get("refresh_token")
     if access_token and not st.session_state.user:
@@ -51,7 +43,7 @@ def require_login():
             st.session_state.user          = res.user
             st.session_state.refresh_token = res.session.refresh_token
         except Exception as e:
-            st.error(f"Login failed: {e}")
+            st.error(f"Login failed (token): {e}")
         st.query_params.clear()
         st.rerun()
         return
@@ -66,7 +58,7 @@ def require_login():
             st.session_state.user          = None
             st.session_state.refresh_token = None
 
-    # ── Show login if still not authenticated ─────────────────────────────────
+    # ── Show login if not authenticated ───────────────────────────────────────
     if not st.session_state.user:
         _show_login_page()
         st.stop()

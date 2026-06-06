@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head><title>Signing in...</title></head>
+<body>
+<p>Signing you in, please wait...</p>
+<script>
+  // Supabase returns tokens as URL hash fragment: #access_token=...&refresh_token=...
+  // This page extracts them and forwards as query params that Python can read
+  var hash = window.location.hash;
+  if (hash && hash.includes('access_token')) {
+    var params = new URLSearchParams(hash.substring(1));
+    var access_token  = params.get('access_token')  || '';
+    var refresh_token = params.get('refresh_token') || '';
+    if (access_token) {
+      window.location.href = 'https://elliptic-screener.streamlit.app/'
+        + '?access_token='  + encodeURIComponent(access_token)
+        + '&refresh_token=' + encodeURIComponent(refresh_token);
+    } else {
+      document.body.innerHTML = 'Login failed: no access token found.';
+    }
+  } else if (window.location.search.includes('code=')) {
+    // PKCE code flow — forward directly to app
+    window.location.href = 'https://elliptic-screener.streamlit.app/' + window.location.search;
+  } else {
+    document.body.innerHTML = 'No auth tokens found. <a href="https://elliptic-screener.streamlit.app/">Go back</a>';
+  }
+</script>
+</body>
+</html>

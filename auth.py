@@ -18,9 +18,11 @@ def get_supabase():
     )
 
 
-def get_cookie_manager():
-    # Must NOT be cached — CookieManager is a widget and must run every render
-    return stx.CookieManager(key="kleos_cookie_manager")
+def _get_cm():
+    """Return the single CookieManager instance stored in session_state."""
+    if "_cm" not in st.session_state:
+        st.session_state._cm = stx.CookieManager(key="kleos_cm")
+    return st.session_state._cm
 
 
 def require_login():
@@ -30,7 +32,7 @@ def require_login():
     Persists login across page refreshes via a browser cookie (60 days).
     """
     sb = get_supabase()
-    cm = get_cookie_manager()
+    cm = _get_cm()
 
     if "user"          not in st.session_state: st.session_state.user          = None
     if "refresh_token" not in st.session_state: st.session_state.refresh_token = None
@@ -64,7 +66,7 @@ def require_login():
         st.rerun()
         return
 
-    # ── Step 3: Try restoring from session_state refresh token ────────────────
+    # ── Step 3: Restore from session_state refresh token ─────────────────────
     if not st.session_state.user and st.session_state.refresh_token:
         try:
             res = sb.auth.refresh_session(st.session_state.refresh_token)
@@ -75,7 +77,7 @@ def require_login():
             st.session_state.user          = None
             st.session_state.refresh_token = None
 
-    # ── Step 4: Try restoring from cookie ────────────────────────────────────
+    # ── Step 4: Restore from cookie ───────────────────────────────────────────
     if not st.session_state.user:
         cookie_token = cm.get(COOKIE_NAME)
         if cookie_token:
@@ -87,9 +89,9 @@ def require_login():
             except Exception:
                 cm.delete(COOKIE_NAME)
 
-    # ── Step 5: Show login page if still not authenticated ────────────────────
+    # ── Step 5: Show login page if not authenticated ──────────────────────────
     if not st.session_state.user:
-        _show_login_page(cm)
+        _show_login_page()
         st.stop()
         return
 
@@ -97,19 +99,21 @@ def require_login():
 
 
 def show_signout_button():
-    cm = get_cookie_manager()
+    """Call inside the sidebar. Reuses the same CookieManager instance."""
     if st.button("Sign out", use_container_width=True):
         try:
             get_supabase().auth.sign_out()
         except Exception:
             pass
+        cm = _get_cm()
         cm.delete(COOKIE_NAME)
         st.session_state.user          = None
         st.session_state.refresh_token = None
+        st.session_state.pop("_cm", None)  # reset cm on next load
         st.rerun()
 
 
-def _show_login_page(cm):
+def _show_login_page():
     logo = st.secrets["app"].get("logo_url", "")
     _, col, _ = st.columns([1, 2, 1])
     with col:

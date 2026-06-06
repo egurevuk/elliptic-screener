@@ -2,8 +2,7 @@
 import streamlit as st
 from supabase import create_client
 
-SUPABASE_URL  = "https://wjyiwevherfllekoxufn.supabase.co"
-# Direct Supabase Google OAuth URL — no API call needed to generate this
+SUPABASE_URL     = "https://wjyiwevherfllekoxufn.supabase.co"
 GOOGLE_LOGIN_URL = f"{SUPABASE_URL}/auth/v1/authorize?provider=google"
 
 
@@ -27,18 +26,19 @@ def require_login():
     if "refresh_token" not in st.session_state:
         st.session_state.refresh_token = None
 
-    # ── Step 1: Handle ?code= callback from Google via Supabase ──────────────
+    # ── Step 1: Handle ?code= callback ───────────────────────────────────────
     code = st.query_params.get("code")
     if code and not st.session_state.user:
-        with st.spinner("Signing you in…"):
-            try:
-                res = sb.auth.exchange_code_for_session({"auth_code": code})
-                st.session_state.user          = res.user
-                st.session_state.refresh_token = res.session.refresh_token
-            except Exception as e:
-                st.error(f"Login failed: {e}")
+        try:
+            res = sb.auth.exchange_code_for_session({"auth_code": code})
+            st.session_state.user          = res.user
+            st.session_state.refresh_token = res.session.refresh_token
+        except Exception as e:
+            st.error(f"Login failed: {e}")
+            st.session_state.user = None
         st.query_params.clear()
         st.rerun()
+        return  # never reached but makes flow explicit
 
     # ── Step 2: Restore session from refresh token ────────────────────────────
     if not st.session_state.user and st.session_state.refresh_token:
@@ -54,6 +54,7 @@ def require_login():
     if not st.session_state.user:
         _show_login_page()
         st.stop()
+        return  # never reached
 
     return st.session_state.user.email
 
@@ -71,7 +72,6 @@ def show_signout_button():
 
 def _show_login_page():
     logo = st.secrets["app"].get("logo_url", "")
-
     _, col, _ = st.columns([1, 2, 1])
     with col:
         if logo:
@@ -81,7 +81,6 @@ def _show_login_page():
         st.divider()
         st.markdown("Sign in with your Google account to continue.")
         st.markdown(" ")
-        # Hardcoded URL — zero API calls on login page render
         st.link_button(
             "🔵  Continue with Google",
             url=GOOGLE_LOGIN_URL,

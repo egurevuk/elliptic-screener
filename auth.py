@@ -1,5 +1,6 @@
 # auth.py
 import streamlit as st
+import streamlit.components.v1 as components
 from supabase import create_client
 
 
@@ -63,11 +64,17 @@ def _show_login_page(sb):
         st.markdown(" ")
 
         if st.button("🔵  Continue with Google", type="primary", use_container_width=True):
-            # No redirect_to — Supabase uses the Site URL set in the dashboard
+            # No redirect_to — Supabase uses Site URL from dashboard
             res = sb.auth.sign_in_with_oauth({"provider": "google"})
-            st.markdown(
-                f'<meta http-equiv="refresh" content="0; url={res.url}">',
-                unsafe_allow_html=True,
+            # Use window.top.location to break out of Streamlit's iframe
+            # so Google redirects to the full page URL, not the iframe URL
+            st.components.v1.html(
+                f"""
+                <script>
+                    window.top.location.href = "{res.url}";
+                </script>
+                """,
+                height=0,
             )
 
         st.markdown(" ")

@@ -74,7 +74,7 @@ def login_wall():
 
 def _render_login_page():
     sb   = get_supabase()
-    url  = st.secrets["app"]["redirect_url"]
+url  = st.secrets["app"]["redirect_url"]
     logo = st.secrets["app"].get("logo_url", "")
 
     # Debug: show what OAuth URL Supabase generates (so we can check redirect_uri)

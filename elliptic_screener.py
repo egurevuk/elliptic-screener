@@ -87,7 +87,7 @@ def load_credentials():
 def log_usage(email: str, wallet: str, scan_type: str,
               wallets_count: int = 1, risk_score=None, verdict: str = None):
     try:
-        get_supabase().table("usage_log").insert({
+        res = get_supabase().table("usage_log").insert({
             "user_id":       email,
             "user_email":    email,
             "wallet":        wallet[:100] if wallet else None,
@@ -96,8 +96,8 @@ def log_usage(email: str, wallet: str, scan_type: str,
             "risk_score":    float(risk_score) if risk_score is not None else None,
             "verdict":       verdict,
         }).execute()
-    except Exception:
-        pass
+    except Exception as e:
+        st.warning(f"⚠️ Usage log error (non-critical): {e}")
 
 # ── Admin stats panel ─────────────────────────────────────────────────────────
 def render_admin_stats():

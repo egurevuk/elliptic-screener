@@ -2,6 +2,7 @@
 import streamlit as st
 from supabase import create_client
 
+
 @st.cache_resource
 def get_supabase():
     return create_client(
@@ -9,14 +10,19 @@ def get_supabase():
         st.secrets["supabase"]["anon_key"],
     )
 
+
 def require_login():
-    """Call at top of main(). Returns user email string."""
+    """
+    Call once at the top of main().
+    Returns the authenticated user's email string.
+    Blocks execution and shows login page until the user signs in.
+    """
     sb = get_supabase()
 
     if "user" not in st.session_state:
         st.session_state.user = None
 
-    # Handle callback from Supabase after Google login
+    # Supabase appends ?code= to the redirect URL after Google login
     code = st.query_params.get("code")
     if code and not st.session_state.user:
         try:
@@ -29,13 +35,23 @@ def require_login():
             st.session_state.user = None
 
     if not st.session_state.user:
-        _show_login(sb)
+        _show_login_page(sb)
         st.stop()
 
     return st.session_state.user.email
 
-def _show_login(sb):
+
+def show_signout_button():
+    """Call inside the sidebar after require_login()."""
+    if st.button("Sign out", use_container_width=True):
+        get_supabase().auth.sign_out()
+        st.session_state.user = None
+        st.rerun()
+
+
+def _show_login_page(sb):
     logo = st.secrets["app"].get("logo_url", "")
+
     _, col, _ = st.columns([1, 2, 1])
     with col:
         if logo:
@@ -43,16 +59,16 @@ def _show_login(sb):
         st.markdown("## AML Wallet Screener")
         st.caption("Powered by Elliptic · Tron / USDT")
         st.divider()
-        st.markdown("Sign in to continue")
-        if st.button("🔵 Continue with Google", type="primary", use_container_width=True):
+        st.markdown("Sign in with your Google account to continue.")
+        st.markdown(" ")
+
+        if st.button("🔵  Continue with Google", type="primary", use_container_width=True):
+            # No redirect_to — Supabase uses the Site URL set in the dashboard
             res = sb.auth.sign_in_with_oauth({"provider": "google"})
             st.markdown(
                 f'<meta http-equiv="refresh" content="0; url={res.url}">',
                 unsafe_allow_html=True,
             )
 
-def show_signout():
-    if st.button("Sign out", use_container_width=True):
-        get_supabase().auth.sign_out()
-        st.session_state.user = None
-        st.rerun()
+        st.markdown(" ")
+        st.caption("Contact your administrator to request access.")

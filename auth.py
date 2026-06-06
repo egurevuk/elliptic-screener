@@ -18,13 +18,12 @@ def require_login():
     """
     sb = get_supabase()
 
-    # Initialise session state keys
     if "user" not in st.session_state:
         st.session_state.user = None
     if "refresh_token" not in st.session_state:
         st.session_state.refresh_token = None
 
-    # ── Step 1: Handle ?code= callback from Google via Supabase ──────────────
+    # ── Step 1: Handle ?code= callback ───────────────────────────────────────
     code = st.query_params.get("code")
     if code and not st.session_state.user:
         with st.spinner("Signing you in…"):
@@ -34,32 +33,28 @@ def require_login():
                 st.session_state.refresh_token = res.session.refresh_token
             except Exception as e:
                 st.error(f"Login failed: {e}")
-                st.session_state.user = None
-        # Clear ?code= from URL and rerun cleanly regardless of success/failure
         st.query_params.clear()
         st.rerun()
 
-    # ── Step 2: No user but refresh token exists — restore session silently ───
+    # ── Step 2: Restore session from refresh token ────────────────────────────
     if not st.session_state.user and st.session_state.refresh_token:
         try:
             res = sb.auth.refresh_session(st.session_state.refresh_token)
             st.session_state.user          = res.user
             st.session_state.refresh_token = res.session.refresh_token
         except Exception:
-            # Refresh token expired — force re-login
             st.session_state.user          = None
             st.session_state.refresh_token = None
 
-    # ── Step 3: Still no user — show login page ───────────────────────────────
+    # ── Step 3: Show login page if still not authenticated ────────────────────
     if not st.session_state.user:
-        _show_login_page(sb)
+        _show_login_page()
         st.stop()
 
     return st.session_state.user.email
 
 
 def show_signout_button():
-    """Call inside the sidebar after require_login()."""
     if st.button("Sign out", use_container_width=True):
         try:
             get_supabase().auth.sign_out()
@@ -70,15 +65,9 @@ def show_signout_button():
         st.rerun()
 
 
-def _show_login_page(sb):
+def _show_login_page():
+    """Render the login page. OAuth URL is only fetched when button is clicked."""
     logo = st.secrets["app"].get("logo_url", "")
-
-    try:
-        res       = sb.auth.sign_in_with_oauth({"provider": "google"})
-        oauth_url = res.url
-    except Exception as e:
-        st.error(f"Could not generate login URL: {e}")
-        return
 
     _, col, _ = st.columns([1, 2, 1])
     with col:
@@ -89,11 +78,24 @@ def _show_login_page(sb):
         st.divider()
         st.markdown("Sign in with your Google account to continue.")
         st.markdown(" ")
+
+        if "oauth_url" not in st.session_state:
+            # Pre-generate the URL once and cache it in session state
+            # so subsequent renders don't make a network call
+            try:
+                sb = get_supabase()
+                res = sb.auth.sign_in_with_oauth({"provider": "google"})
+                st.session_state.oauth_url = res.url
+            except Exception as e:
+                st.error(f"Could not generate login URL: {e}")
+                return
+
         st.link_button(
             "🔵  Continue with Google",
-            url=oauth_url,
+            url=st.session_state.oauth_url,
             use_container_width=True,
             type="primary",
         )
+
         st.markdown(" ")
         st.caption("Contact your administrator to request access.")

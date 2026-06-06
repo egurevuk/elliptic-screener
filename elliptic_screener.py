@@ -332,7 +332,10 @@ def render_contribution_side(items, label):
     if chart:
         cdf = pd.DataFrame(chart).sort_values("USD", ascending=False).head(15)
         st.markdown(f"**{label} — Top Counterparties (USD)**")
-        st.bar_chart(cdf.set_index("Entity")["USD"])
+        # Use table instead of bar_chart to avoid altair/Python 3.14 incompatibility
+        cdf["Value (USD)"] = cdf["USD"].apply(lambda x: f"${x:,.2f}")
+        st.dataframe(cdf[["Entity","Value (USD)"]].reset_index(drop=True),
+                     use_container_width=True, hide_index=True)
 
 def render_contributions(data):
     st.markdown("### 💡 Counterparty Contributions")

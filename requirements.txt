@@ -2,4 +2,4 @@ streamlit
 requests
 pandas
 openpyxl
-supabase
+supabase==2.4.3

@@ -1,6 +1,5 @@
 # auth.py
 import streamlit as st
-import streamlit.components.v1 as components
 from supabase import create_client
 
 
@@ -53,6 +52,14 @@ def show_signout_button():
 def _show_login_page(sb):
     logo = st.secrets["app"].get("logo_url", "")
 
+    # Generate the Google OAuth URL from Supabase
+    try:
+        res = sb.auth.sign_in_with_oauth({"provider": "google"})
+        oauth_url = res.url
+    except Exception as e:
+        st.error(f"Could not generate login URL: {e}")
+        return
+
     _, col, _ = st.columns([1, 2, 1])
     with col:
         if logo:
@@ -63,19 +70,14 @@ def _show_login_page(sb):
         st.markdown("Sign in with your Google account to continue.")
         st.markdown(" ")
 
-        if st.button("🔵  Continue with Google", type="primary", use_container_width=True):
-            # No redirect_to — Supabase uses Site URL from dashboard
-            res = sb.auth.sign_in_with_oauth({"provider": "google"})
-            # Use window.top.location to break out of Streamlit's iframe
-            # so Google redirects to the full page URL, not the iframe URL
-            st.components.v1.html(
-                f"""
-                <script>
-                    window.top.location.href = "{res.url}";
-                </script>
-                """,
-                height=0,
-            )
+        # st.link_button opens in the top browser frame, not the iframe
+        # This avoids the Streamlit iframe sandbox blocking window.top redirects
+        st.link_button(
+            "🔵  Continue with Google",
+            url=oauth_url,
+            use_container_width=True,
+            type="primary",
+        )
 
         st.markdown(" ")
         st.caption("Contact your administrator to request access.")

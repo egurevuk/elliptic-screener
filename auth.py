@@ -3,7 +3,15 @@ import streamlit as st
 from supabase import create_client
 
 SUPABASE_URL     = "https://wjyiwevherfllekoxufn.supabase.co"
-GOOGLE_LOGIN_URL = f"{SUPABASE_URL}/auth/v1/authorize?provider=google"
+SUPABASE_ANON    = None   # loaded from secrets at runtime
+
+# Force PKCE flow — this makes Supabase return ?code= instead of #access_token=
+GOOGLE_LOGIN_URL = (
+    f"{SUPABASE_URL}/auth/v1/authorize"
+    f"?provider=google"
+    f"&flow_type=pkce"
+    f"&redirect_to=https://elliptic-screener.streamlit.app/"
+)
 
 
 @st.cache_resource
@@ -26,7 +34,7 @@ def require_login():
     if "refresh_token" not in st.session_state:
         st.session_state.refresh_token = None
 
-    # ── Step 1: Handle ?code= callback ───────────────────────────────────────
+    # ── Step 1: Handle ?code= callback (PKCE flow) ────────────────────────────
     code = st.query_params.get("code")
     if code and not st.session_state.user:
         try:
@@ -38,7 +46,7 @@ def require_login():
             st.session_state.user = None
         st.query_params.clear()
         st.rerun()
-        return  # never reached but makes flow explicit
+        return
 
     # ── Step 2: Restore session from refresh token ────────────────────────────
     if not st.session_state.user and st.session_state.refresh_token:
@@ -54,7 +62,7 @@ def require_login():
     if not st.session_state.user:
         _show_login_page()
         st.stop()
-        return  # never reached
+        return
 
     return st.session_state.user.email
 

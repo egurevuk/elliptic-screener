@@ -15,12 +15,10 @@ def require_login():
     """
     Call once at the top of main(), AFTER st.set_page_config().
     Returns the authenticated user's email string.
-    - Handles ?code= OAuth callback
-    - Persists session via refresh_token (survives page reloads)
-    - Only forces re-login if refresh token expires (60 days on free plan)
     """
     sb = get_supabase()
 
+    # Initialise session state keys
     if "user" not in st.session_state:
         st.session_state.user = None
     if "refresh_token" not in st.session_state:
@@ -28,28 +26,27 @@ def require_login():
 
     # ── Step 1: Handle ?code= callback from Google via Supabase ──────────────
     code = st.query_params.get("code")
-    if code:
-        # Clear the code from URL immediately to prevent reuse on refresh
+    if code and not st.session_state.user:
+        with st.spinner("Signing you in…"):
+            try:
+                res = sb.auth.exchange_code_for_session({"auth_code": code})
+                st.session_state.user          = res.user
+                st.session_state.refresh_token = res.session.refresh_token
+            except Exception as e:
+                st.error(f"Login failed: {e}")
+                st.session_state.user = None
+        # Clear ?code= from URL and rerun cleanly regardless of success/failure
         st.query_params.clear()
-        if not st.session_state.user:
-            with st.spinner("Signing you in…"):
-                try:
-                    res = sb.auth.exchange_code_for_session({"auth_code": code})
-                    st.session_state.user          = res.user
-                    st.session_state.refresh_token = res.session.refresh_token
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Login failed: {e}")
-                    st.session_state.user = None
+        st.rerun()
 
-    # ── Step 2: No user but we have a refresh token — restore session silently ─
+    # ── Step 2: No user but refresh token exists — restore session silently ───
     if not st.session_state.user and st.session_state.refresh_token:
         try:
             res = sb.auth.refresh_session(st.session_state.refresh_token)
             st.session_state.user          = res.user
             st.session_state.refresh_token = res.session.refresh_token
         except Exception:
-            # Refresh token expired — clear and force re-login
+            # Refresh token expired — force re-login
             st.session_state.user          = None
             st.session_state.refresh_token = None
 

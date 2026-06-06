@@ -1,17 +1,10 @@
 # auth.py
 import streamlit as st
+import streamlit.components.v1 as components
 from supabase import create_client
 
 SUPABASE_URL     = "https://wjyiwevherfllekoxufn.supabase.co"
-SUPABASE_ANON    = None   # loaded from secrets at runtime
-
-# Force PKCE flow — this makes Supabase return ?code= instead of #access_token=
-GOOGLE_LOGIN_URL = (
-    f"{SUPABASE_URL}/auth/v1/authorize"
-    f"?provider=google"
-    f"&flow_type=pkce"
-    f"&redirect_to=https://elliptic-screener.streamlit.app/"
-)
+GOOGLE_LOGIN_URL = f"{SUPABASE_URL}/auth/v1/authorize?provider=google"
 
 
 @st.cache_resource
@@ -26,6 +19,10 @@ def require_login():
     """
     Call once at the top of main(), AFTER st.set_page_config().
     Returns the authenticated user's email string.
+
+    Handles both flows:
+    - PKCE: ?code= query param  (ideal)
+    - Implicit: #access_token=  (Supabase fallback — extracted via JS)
     """
     sb = get_supabase()
 
@@ -34,7 +31,7 @@ def require_login():
     if "refresh_token" not in st.session_state:
         st.session_state.refresh_token = None
 
-    # ── Step 1: Handle ?code= callback (PKCE flow) ────────────────────────────
+    # ── Step 1a: Handle ?code= (PKCE flow) ───────────────────────────────────
     code = st.query_params.get("code")
     if code and not st.session_state.user:
         try:
@@ -43,7 +40,20 @@ def require_login():
             st.session_state.refresh_token = res.session.refresh_token
         except Exception as e:
             st.error(f"Login failed: {e}")
-            st.session_state.user = None
+        st.query_params.clear()
+        st.rerun()
+        return
+
+    # ── Step 1b: Handle ?access_token= (extracted from hash by JS below) ─────
+    access_token  = st.query_params.get("access_token")
+    refresh_token = st.query_params.get("refresh_token")
+    if access_token and not st.session_state.user:
+        try:
+            res = sb.auth.set_session(access_token, refresh_token or "")
+            st.session_state.user          = res.user
+            st.session_state.refresh_token = res.session.refresh_token
+        except Exception as e:
+            st.error(f"Login failed: {e}")
         st.query_params.clear()
         st.rerun()
         return
@@ -80,6 +90,29 @@ def show_signout_button():
 
 def _show_login_page():
     logo = st.secrets["app"].get("logo_url", "")
+
+    # ── JS: extract #access_token from URL hash and redirect as ?access_token=
+    # This runs in the browser, converts the hash fragment into query params
+    # that Python/Streamlit can read via st.query_params
+    components.html("""
+        <script>
+        (function() {
+            var hash = window.top.location.hash;
+            if (hash && hash.includes('access_token')) {
+                var params = new URLSearchParams(hash.substring(1));
+                var access_token  = params.get('access_token');
+                var refresh_token = params.get('refresh_token') || '';
+                if (access_token) {
+                    var base = window.top.location.origin + window.top.location.pathname;
+                    window.top.location.href = base
+                        + '?access_token=' + encodeURIComponent(access_token)
+                        + '&refresh_token=' + encodeURIComponent(refresh_token);
+                }
+            }
+        })();
+        </script>
+    """, height=0)
+
     _, col, _ = st.columns([1, 2, 1])
     with col:
         if logo:

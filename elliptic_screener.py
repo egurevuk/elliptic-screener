@@ -91,7 +91,12 @@ def _render_login_page():
             try:
                 result = sb.auth.sign_in_with_oauth({
                     "provider": "google",
-                    "options": {"redirect_to": url},
+                    "options": {
+                        # redirect_to must point to the Supabase callback —
+                        # Supabase then forwards to the site URL we set in the dashboard
+                        "redirect_to": f"https://wjyiwevherfllekoxufn.supabase.co/auth/v1/callback",
+                        "scopes": "email profile",
+                    },
                 })
                 st.markdown(
                     f'<meta http-equiv="refresh" content="0; url={result.url}">',

@@ -1,5 +1,5 @@
-streamlit>=1.35.0
+streamlit==1.45.0
 requests
 pandas
 openpyxl
-supabase
+supabase==2.4.3

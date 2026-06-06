@@ -5,22 +5,25 @@ Screens Tron USDT wallets using the Elliptic Synchronous Screening API.
 Install:
     pip install streamlit requests pandas openpyxl supabase
 
-Run:
-    streamlit run elliptic_screener.py
-
 secrets.toml:
+    [auth]
+    redirect_uri = "https://elliptic-screener.streamlit.app/oauth2callback"
+
+    [auth.providers.google]
+    client_id     = "YOUR_GOOGLE_CLIENT_ID"
+    client_secret = "YOUR_GOOGLE_CLIENT_SECRET"
+
     [elliptic]
     api_key    = "your-elliptic-api-key"
     api_secret = "your-elliptic-api-secret"
 
     [supabase]
-    url      = "https://xxxx.supabase.co"
-    anon_key = "your-supabase-anon-key"
+    url      = "https://wjyiwevherfllekoxufn.supabase.co"
+    anon_key = "your-legacy-anon-key"
 
     [app]
-    admin_email    = "your@email.com"
-    redirect_url   = "https://elliptic-screener.streamlit.app/"
-    logo_url       = "https://raw.githubusercontent.com/egurevuk/elliptic-screener/main/kleos_logo.png"
+    admin_email = "your@email.com"
+    logo_url    = "https://raw.githubusercontent.com/egurevuk/elliptic-screener/main/kleos_logo.png"
 """
 
 import hashlib, hmac, json, time, base64, uuid, io
@@ -121,13 +124,12 @@ def _render_login_page():
         st.caption("By signing in you agree to use this tool for legitimate compliance purposes only.")
 
 # ── Usage logging ─────────────────────────────────────────────────────────────
-def log_usage(user, wallet: str, scan_type: str,
+def log_usage(email: str, wallet: str, scan_type: str,
               wallets_count: int = 1, risk_score=None, verdict: str = None):
-    """Write one usage record to Supabase. Never raises — logging must not break the app."""
     try:
         get_supabase().table("usage_log").insert({
-            "user_id":       str(user.id),
-            "user_email":    user.email,
+            "user_id":       email,
+            "user_email":    email,
             "wallet":        wallet[:100] if wallet else None,
             "scan_type":     scan_type,
             "wallets_count": wallets_count,
@@ -500,7 +502,9 @@ def main():
     st.set_page_config(page_title="Kleos AML Screener", page_icon="🔍", layout="wide")
 
     # ── Auth gate
-    user = login_wall()
+    user       = login_wall()
+    user_email = user.email or ""
+    user_name  = user.name  or user_email
 
     # ── Credentials
     api_key, api_secret, from_secrets = load_credentials()
@@ -513,11 +517,10 @@ def main():
         if logo:
             st.image(logo, width=120)
         st.divider()
-        st.caption(f"👤 {user.email}")
+        st.caption(f"👤 {user_name}")
+        st.caption(f"📧 {user_email}")
         if st.button("Sign out", use_container_width=True):
-            get_supabase().auth.sign_out()
-            st.session_state.user = None
-            st.rerun()
+            st.logout()
         st.divider()
         if from_secrets:
             st.success("🔑 API credentials loaded")
@@ -532,7 +535,7 @@ def main():
         st.markdown("[📖 Elliptic Docs](https://developers.elliptic.co/docs/quick-start-sdks)")
 
         # Admin stats — only visible to admin email
-        if user.email == admin_email:
+        if user_email == admin_email:
             with st.expander("📊 Admin: Usage Stats"):
                 render_admin_stats()
 
@@ -574,12 +577,12 @@ def main():
                     verdict = ("✅ Clear" if score_f is not None and float(score_f) < 1
                                else "🟠 Medium Risk" if score_f is not None and float(score_f) < 5
                                else "🔴 High Risk" if score_f is not None else "❓ Unknown")
-                    log_usage(user, address.strip(), "single",
+                    log_usage(user_email, address.strip(), "single",
                               risk_score=score_f, verdict=verdict)
                     st.success("✅ Screening complete!")
                     render_report(result, address.strip())
                 except WalletNotFoundError:
-                    log_usage(user, address.strip(), "single", verdict="⬜ Not Found")
+                    log_usage(user_email, address.strip(), "single", verdict="⬜ Not Found")
                     render_not_found(address.strip())
                 except requests.HTTPError:
                     pass
@@ -692,7 +695,7 @@ def main():
                             "Flagged Entities": "; ".join(set(flagged)) if flagged else "None",
                             "Triggered Rules":  "; ".join(rules) if rules else "None",
                             "Error": ""})
-                        log_usage(user, addr, "bulk", risk_score=score_f, verdict=verdict)
+                        log_usage(user_email, addr, "bulk", risk_score=score_f, verdict=verdict)
 
                     except WalletNotFoundError:
                         verdict = "⬜ Not Found"
@@ -702,7 +705,7 @@ def main():
                             "Inflow (USD)":"—","Outflow (USD)":"—",
                             "Flagged Entities":"—","Triggered Rules":"—",
                             "Error":"Wallet not on blockchain / empty"})
-                        log_usage(user, addr, "bulk", verdict=verdict)
+                        log_usage(user_email, addr, "bulk", verdict=verdict)
 
                     except Exception as e:
                         verdict = "❌ Error"
@@ -712,7 +715,7 @@ def main():
                             "Inflow (USD)":"—","Outflow (USD)":"—",
                             "Flagged Entities":"—","Triggered Rules":"—",
                             "Error": str(e)})
-                        log_usage(user, addr, "bulk", verdict=verdict)
+                        log_usage(user_email, addr, "bulk", verdict=verdict)
 
                     if i < total - 1:
                         time.sleep(delay)

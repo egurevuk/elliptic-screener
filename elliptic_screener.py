@@ -520,7 +520,9 @@ def main():
         st.caption(f"👤 {user_name}")
         st.caption(f"📧 {user_email}")
         if st.button("Sign out", use_container_width=True):
-            st.logout()
+            st.session_state.authenticated = False
+            st.session_state.user_email = ""
+            st.rerun()
         st.divider()
         if from_secrets:
             st.success("🔑 API credentials loaded")

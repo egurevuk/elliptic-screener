@@ -87,8 +87,7 @@ def load_credentials():
 def log_usage(email: str, wallet: str, scan_type: str,
               wallets_count: int = 1, risk_score=None, verdict: str = None):
     try:
-        res = get_supabase().table("usage_log").insert({
-            "user_id":       email,
+        get_supabase().table("usage_log").insert({
             "user_email":    email,
             "wallet":        wallet[:100] if wallet else None,
             "scan_type":     scan_type,

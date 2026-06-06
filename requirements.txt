@@ -4,3 +4,4 @@ pandas
 openpyxl
 supabase==2.4.3
 altair<6.0.0
+extra-streamlit-components==0.1.71

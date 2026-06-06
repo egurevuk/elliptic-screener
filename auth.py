@@ -18,8 +18,8 @@ def get_supabase():
     )
 
 
-@st.cache_resource
 def get_cookie_manager():
+    # Must NOT be cached — CookieManager is a widget and must run every render
     return stx.CookieManager(key="kleos_cookie_manager")
 
 
@@ -27,7 +27,7 @@ def require_login():
     """
     Call once at the top of main(), AFTER st.set_page_config().
     Returns the authenticated user's email string.
-    Persists login across page refreshes via a browser cookie.
+    Persists login across page refreshes via a browser cookie (60 days).
     """
     sb = get_supabase()
     cm = get_cookie_manager()
@@ -42,7 +42,6 @@ def require_login():
             res = sb.auth.exchange_code_for_session({"auth_code": code})
             st.session_state.user          = res.user
             st.session_state.refresh_token = res.session.refresh_token
-            # Save refresh token in cookie so it survives page refreshes
             cm.set(COOKIE_NAME, res.session.refresh_token, max_age=COOKIE_MAX_AGE)
         except Exception as e:
             st.error(f"Login failed: {e}")
@@ -76,7 +75,7 @@ def require_login():
             st.session_state.user          = None
             st.session_state.refresh_token = None
 
-    # ── Step 4: Try restoring from cookie (survives page refresh) ─────────────
+    # ── Step 4: Try restoring from cookie ────────────────────────────────────
     if not st.session_state.user:
         cookie_token = cm.get(COOKIE_NAME)
         if cookie_token:
@@ -84,15 +83,13 @@ def require_login():
                 res = sb.auth.refresh_session(cookie_token)
                 st.session_state.user          = res.user
                 st.session_state.refresh_token = res.session.refresh_token
-                # Rotate the cookie with new refresh token
                 cm.set(COOKIE_NAME, res.session.refresh_token, max_age=COOKIE_MAX_AGE)
             except Exception:
-                # Cookie expired — delete it and show login
                 cm.delete(COOKIE_NAME)
 
-    # ── Step 5: Show login if still not authenticated ─────────────────────────
+    # ── Step 5: Show login page if still not authenticated ────────────────────
     if not st.session_state.user:
-        _show_login_page()
+        _show_login_page(cm)
         st.stop()
         return
 
@@ -112,7 +109,7 @@ def show_signout_button():
         st.rerun()
 
 
-def _show_login_page():
+def _show_login_page(cm):
     logo = st.secrets["app"].get("logo_url", "")
     _, col, _ = st.columns([1, 2, 1])
     with col:

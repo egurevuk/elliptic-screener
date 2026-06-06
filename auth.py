@@ -2,6 +2,10 @@
 import streamlit as st
 from supabase import create_client
 
+SUPABASE_URL  = "https://wjyiwevherfllekoxufn.supabase.co"
+# Direct Supabase Google OAuth URL — no API call needed to generate this
+GOOGLE_LOGIN_URL = f"{SUPABASE_URL}/auth/v1/authorize?provider=google"
+
 
 @st.cache_resource
 def get_supabase():
@@ -23,7 +27,7 @@ def require_login():
     if "refresh_token" not in st.session_state:
         st.session_state.refresh_token = None
 
-    # ── Step 1: Handle ?code= callback ───────────────────────────────────────
+    # ── Step 1: Handle ?code= callback from Google via Supabase ──────────────
     code = st.query_params.get("code")
     if code and not st.session_state.user:
         with st.spinner("Signing you in…"):
@@ -46,7 +50,7 @@ def require_login():
             st.session_state.user          = None
             st.session_state.refresh_token = None
 
-    # ── Step 3: Show login page if still not authenticated ────────────────────
+    # ── Step 3: Show login page if not authenticated ──────────────────────────
     if not st.session_state.user:
         _show_login_page()
         st.stop()
@@ -66,7 +70,6 @@ def show_signout_button():
 
 
 def _show_login_page():
-    """Render the login page. OAuth URL is only fetched when button is clicked."""
     logo = st.secrets["app"].get("logo_url", "")
 
     _, col, _ = st.columns([1, 2, 1])
@@ -78,24 +81,12 @@ def _show_login_page():
         st.divider()
         st.markdown("Sign in with your Google account to continue.")
         st.markdown(" ")
-
-        if "oauth_url" not in st.session_state:
-            # Pre-generate the URL once and cache it in session state
-            # so subsequent renders don't make a network call
-            try:
-                sb = get_supabase()
-                res = sb.auth.sign_in_with_oauth({"provider": "google"})
-                st.session_state.oauth_url = res.url
-            except Exception as e:
-                st.error(f"Could not generate login URL: {e}")
-                return
-
+        # Hardcoded URL — zero API calls on login page render
         st.link_button(
             "🔵  Continue with Google",
-            url=st.session_state.oauth_url,
+            url=GOOGLE_LOGIN_URL,
             use_container_width=True,
             type="primary",
         )
-
         st.markdown(" ")
         st.caption("Contact your administrator to request access.")
